@@ -8,7 +8,6 @@ import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Matrix
 import android.graphics.Paint
-import android.graphics.Path
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.graphics.RadialGradient
@@ -31,12 +30,12 @@ class FogMirrorWallpaperService : WallpaperService() {
         private val handler = Handler(Looper.getMainLooper())
         private val random = Random(System.nanoTime())
         private val droplets = mutableListOf<Droplet>()
-        private val wetEdges = mutableListOf<WetEdge>()
 
         private var visible = false
         private var surfaceWidth = 1
         private var surfaceHeight = 1
         private var lastFrameNanos = 0L
+        private var fogReturnAccumulator = 0f
         private var lastTouchX = 0f
         private var lastTouchY = 0f
         private var hasLastTouch = false
@@ -68,23 +67,9 @@ class FogMirrorWallpaperService : WallpaperService() {
             xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
         }
         private val softReturnPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(18, 255, 255, 255)
+            color = Color.argb(10, 255, 255, 255)
             style = Paint.Style.FILL
-            maskFilter = BlurMaskFilter(45f, BlurMaskFilter.Blur.NORMAL)
-        }
-        private val wetEdgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeCap = Paint.Cap.ROUND
-            strokeJoin = Paint.Join.ROUND
-            strokeWidth = 18f
-            color = Color.argb(95, 235, 250, 255)
-            maskFilter = BlurMaskFilter(20f, BlurMaskFilter.Blur.NORMAL)
-        }
-        private val streakPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeCap = Paint.Cap.ROUND
-            color = Color.argb(82, 245, 252, 255)
-            maskFilter = BlurMaskFilter(6f, BlurMaskFilter.Blur.NORMAL)
+            maskFilter = BlurMaskFilter(56f, BlurMaskFilter.Blur.NORMAL)
         }
         private val dropletBodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.FILL
@@ -92,6 +77,9 @@ class FogMirrorWallpaperService : WallpaperService() {
         private val dropletShinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.FILL
             color = Color.argb(170, 255, 255, 255)
+        }
+        private val aestheticGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
         }
 
         override fun onCreate(surfaceHolder: SurfaceHolder) {
@@ -154,7 +142,7 @@ class FogMirrorWallpaperService : WallpaperService() {
 
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     hasLastTouch = false
-                    spawnDroplets(event.x, event.y, 3)
+                    spawnDroplets(event.x, event.y, 1)
                 }
             }
             super.onTouchEvent(event)
@@ -196,7 +184,7 @@ class FogMirrorWallpaperService : WallpaperService() {
 
             val holder = surfaceHolder
             val canvas = try {
-                holder.lockCanvas()
+                holder.lockHardwareCanvas()
             } catch (_: Exception) {
                 null
             } ?: run {
@@ -208,7 +196,7 @@ class FogMirrorWallpaperService : WallpaperService() {
                 canvas.drawColor(Color.BLACK)
                 canvas.drawBitmap(clearBitmap, imageMatrix, clearPaint)
                 drawFogLayer(canvas)
-                drawWetEdges(canvas, dt)
+                drawSoftAestheticGlow(canvas)
                 drawDroplets(canvas)
             } finally {
                 holder.unlockCanvasAndPost(canvas)
@@ -246,31 +234,28 @@ class FogMirrorWallpaperService : WallpaperService() {
         }
 
         private fun wipeSegment(startX: Float, startY: Float, endX: Float, endY: Float, pressure: Float) {
-            // Several offset strokes make the wipe look like skin dragging through wet glass.
-            repeat(4) {
+            // Several faint offset strokes make a soft finger wipe without drawing a visible water trail.
+            repeat(3) {
                 val jitter = 9f + it * 4f
                 val sx = startX + random.nextFloatSigned(jitter)
                 val sy = startY + random.nextFloatSigned(jitter)
                 val ex = endX + random.nextFloatSigned(jitter)
                 val ey = endY + random.nextFloatSigned(jitter)
-                wipePaint.strokeWidth = random.nextFloat(58f, 108f) * pressure
+                wipePaint.strokeWidth = random.nextFloat(46f, 88f) * pressure
                 fogMaskCanvas.drawLine(sx, sy, ex, ey, wipePaint)
             }
-
-            val edgePath = Path().apply {
-                moveTo(startX, startY)
-                quadTo((startX + endX) * 0.5f, (startY + endY) * 0.5f, endX, endY)
-            }
-            wetEdges += WetEdge(edgePath, 1f, random.nextFloat(15f, 28f))
-            spawnDroplets(endX, endY, random.nextInt(1, 4))
         }
 
         private fun returnFogNonUniformly(dt: Float) {
             // Fog returns slowly as soft cloudy patches, so cleared regions never refill as flat shapes.
-            val patches = max(1, (dt * 70f).toInt())
+            fogReturnAccumulator += dt
+            if (fogReturnAccumulator < 0.045f) return
+            val patchBudget = fogReturnAccumulator
+            fogReturnAccumulator = 0f
+            val patches = max(1, (patchBudget * 34f).toInt())
             repeat(patches) {
-                softReturnPaint.alpha = random.nextInt(5, 18)
-                val radius = random.nextFloat(35f, 145f)
+                softReturnPaint.alpha = random.nextInt(4, 11)
+                val radius = random.nextFloat(60f, 175f)
                 fogMaskCanvas.drawCircle(
                     random.nextFloat(0f, surfaceWidth.toFloat()),
                     random.nextFloat(0f, surfaceHeight.toFloat()),
@@ -281,7 +266,7 @@ class FogMirrorWallpaperService : WallpaperService() {
         }
 
         private fun updateDroplets(dt: Float) {
-            // Droplets speed up as they fall and keep their path as a wet streak.
+            // A few small droplets drift down slowly; the swipe itself stays clean.
             val iterator = droplets.iterator()
             while (iterator.hasNext()) {
                 val drop = iterator.next()
@@ -289,9 +274,8 @@ class FogMirrorWallpaperService : WallpaperService() {
                 drop.velocityY += drop.gravity * dt
                 drop.x += drop.velocityX * dt
                 drop.y += drop.velocityY * dt
-                drop.trail.lineTo(drop.x, drop.y)
 
-                if (drop.y - drop.radius > surfaceHeight || drop.age > 12f) {
+                if (drop.y - drop.radius > surfaceHeight || drop.age > 8f) {
                     iterator.remove()
                 }
             }
@@ -323,44 +307,43 @@ class FogMirrorWallpaperService : WallpaperService() {
         }
 
         private fun spawnDroplets(x: Float, y: Float, count: Int) {
-            if (droplets.size > 130) return
+            if (droplets.size > 28) return
             repeat(count) {
-                if (random.nextFloat() > 0.72f) return@repeat
-                val radius = random.nextFloat(3.5f, 12f)
-                val dx = random.nextFloatSigned(42f)
-                val dy = random.nextFloatSigned(26f)
+                if (random.nextFloat() > 0.28f) return@repeat
+                val radius = random.nextFloat(2.6f, 7.2f)
+                val dx = random.nextFloatSigned(30f)
+                val dy = random.nextFloatSigned(18f)
                 droplets += Droplet(
                     x = x + dx,
                     y = y + dy,
                     radius = radius,
-                    velocityX = random.nextFloatSigned(6f),
-                    velocityY = random.nextFloat(10f, 58f),
-                    gravity = random.nextFloat(36f, 95f),
-                    trail = Path().apply { moveTo(x + dx, y + dy) }
+                    velocityX = random.nextFloatSigned(2.4f),
+                    velocityY = random.nextFloat(4f, 20f),
+                    gravity = random.nextFloat(12f, 34f)
                 )
             }
         }
 
-        private fun drawWetEdges(canvas: Canvas, dt: Float) {
-            val iterator = wetEdges.iterator()
-            while (iterator.hasNext()) {
-                val edge = iterator.next()
-                edge.life -= dt * 0.38f
-                if (edge.life <= 0f) {
-                    iterator.remove()
-                    continue
-                }
-                wetEdgePaint.strokeWidth = edge.width
-                wetEdgePaint.alpha = (90 * edge.life).toInt().coerceIn(0, 90)
-                canvas.drawPath(edge.path, wetEdgePaint)
-            }
+        private fun drawSoftAestheticGlow(canvas: Canvas) {
+            aestheticGlowPaint.shader = LinearGradient(
+                0f,
+                0f,
+                surfaceWidth.toFloat(),
+                surfaceHeight.toFloat(),
+                intArrayOf(
+                    Color.argb(22, 255, 255, 255),
+                    Color.argb(0, 255, 255, 255),
+                    Color.argb(28, 185, 215, 225)
+                ),
+                floatArrayOf(0f, 0.52f, 1f),
+                Shader.TileMode.CLAMP
+            )
+            canvas.drawRect(0f, 0f, surfaceWidth.toFloat(), surfaceHeight.toFloat(), aestheticGlowPaint)
+            aestheticGlowPaint.shader = null
         }
 
         private fun drawDroplets(canvas: Canvas) {
             for (drop in droplets) {
-                streakPaint.strokeWidth = max(2f, drop.radius * 0.35f)
-                canvas.drawPath(drop.trail, streakPaint)
-
                 dropletBodyPaint.shader = RadialGradient(
                     drop.x - drop.radius * 0.35f,
                     drop.y - drop.radius * 0.45f,
@@ -437,14 +420,7 @@ class FogMirrorWallpaperService : WallpaperService() {
         var velocityX: Float,
         var velocityY: Float,
         val gravity: Float,
-        val trail: Path,
         var age: Float = 0f
-    )
-
-    private data class WetEdge(
-        val path: Path,
-        var life: Float,
-        val width: Float
     )
 }
 
