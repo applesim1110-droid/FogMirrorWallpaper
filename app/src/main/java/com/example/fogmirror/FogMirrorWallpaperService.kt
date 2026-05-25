@@ -24,6 +24,10 @@ import kotlin.math.min
 import kotlin.random.Random
 
 class FogMirrorWallpaperService : WallpaperService() {
+    private companion object {
+        private const val INITIAL_FOG_ALPHA = 178
+    }
+
     override fun onCreateEngine(): Engine = FogMirrorEngine()
 
     private inner class FogMirrorEngine : Engine() {
@@ -142,7 +146,7 @@ class FogMirrorWallpaperService : WallpaperService() {
 
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     hasLastTouch = false
-                    spawnDroplets(event.x, event.y, 1)
+                    spawnDroplets(event.x, event.y, 3)
                 }
             }
             super.onTouchEvent(event)
@@ -152,7 +156,7 @@ class FogMirrorWallpaperService : WallpaperService() {
             // The mask stores where fog is still present. Transparent pixels are wiped glass.
             fogMask = Bitmap.createBitmap(surfaceWidth, surfaceHeight, Bitmap.Config.ARGB_8888)
             fogMaskCanvas = Canvas(fogMask)
-            fogMaskCanvas.drawColor(Color.WHITE)
+            fogMaskCanvas.drawColor(Color.argb(INITIAL_FOG_ALPHA, 255, 255, 255))
             condensationNoise = createCondensationNoise(surfaceWidth, surfaceHeight)
             configureCenterCropMatrix()
         }
@@ -244,18 +248,21 @@ class FogMirrorWallpaperService : WallpaperService() {
                 wipePaint.strokeWidth = random.nextFloat(46f, 88f) * pressure
                 fogMaskCanvas.drawLine(sx, sy, ex, ey, wipePaint)
             }
+            if (random.nextFloat() < 0.1f) {
+                spawnDroplets(endX, endY, 1)
+            }
         }
 
         private fun returnFogNonUniformly(dt: Float) {
             // Fog returns slowly as soft cloudy patches, so cleared regions never refill as flat shapes.
             fogReturnAccumulator += dt
-            if (fogReturnAccumulator < 0.045f) return
+            if (fogReturnAccumulator < 0.025f) return
             val patchBudget = fogReturnAccumulator
             fogReturnAccumulator = 0f
-            val patches = max(1, (patchBudget * 34f).toInt())
+            val patches = max(1, (patchBudget * 64f).toInt())
             repeat(patches) {
-                softReturnPaint.alpha = random.nextInt(4, 11)
-                val radius = random.nextFloat(60f, 175f)
+                softReturnPaint.alpha = random.nextInt(9, 22)
+                val radius = random.nextFloat(70f, 195f)
                 fogMaskCanvas.drawCircle(
                     random.nextFloat(0f, surfaceWidth.toFloat()),
                     random.nextFloat(0f, surfaceHeight.toFloat()),
@@ -307,12 +314,12 @@ class FogMirrorWallpaperService : WallpaperService() {
         }
 
         private fun spawnDroplets(x: Float, y: Float, count: Int) {
-            if (droplets.size > 28) return
+            if (droplets.size > 42) return
             repeat(count) {
-                if (random.nextFloat() > 0.28f) return@repeat
-                val radius = random.nextFloat(2.6f, 7.2f)
-                val dx = random.nextFloatSigned(30f)
-                val dy = random.nextFloatSigned(18f)
+                if (random.nextFloat() > 0.58f) return@repeat
+                val radius = random.nextFloat(2.8f, 8.4f)
+                val dx = random.nextFloatSigned(36f)
+                val dy = random.nextFloatSigned(22f)
                 droplets += Droplet(
                     x = x + dx,
                     y = y + dy,
