@@ -263,8 +263,14 @@ class FogMirrorWallpaperService : WallpaperService() {
         private fun returnFogNonUniformly(dt: Float) {
             // Restore the fog as a smooth six-second fade with faint circular condensation variation.
             if (secondsSinceTouch < 0.08f) return
+            if (secondsSinceTouch >= FOG_RECOVERY_SECONDS) {
+                fogReturnAccumulator = 0f
+                fogMaskCanvas.drawColor(Color.argb(INITIAL_FOG_ALPHA, 255, 255, 255), PorterDuff.Mode.SRC)
+                return
+            }
+
             val progress = (secondsSinceTouch / FOG_RECOVERY_SECONDS).coerceIn(0f, 1f)
-            smoothReturnPaint.alpha = if (progress < 1f) 1 else 2
+            smoothReturnPaint.alpha = if (progress < 0.72f) 1 else 2
             fogMaskCanvas.drawRect(0f, 0f, surfaceWidth.toFloat(), surfaceHeight.toFloat(), smoothReturnPaint)
 
             fogReturnAccumulator += dt
