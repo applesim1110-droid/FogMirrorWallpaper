@@ -56,33 +56,37 @@ class FogMirrorWallpaperService : WallpaperService() {
         }
 
         private val clearPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-        private val fogPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        private val fogPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+            alpha = INITIAL_FOG_ALPHA
+        }
         private val maskPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
+            xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
         }
         private val wipePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
             style = Paint.Style.STROKE
             strokeCap = Paint.Cap.ROUND
             strokeJoin = Paint.Join.ROUND
             strokeWidth = 96f
             maskFilter = BlurMaskFilter(38f, BlurMaskFilter.Blur.NORMAL)
-            xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
         }
         private val wipeCorePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
             style = Paint.Style.STROKE
             strokeCap = Paint.Cap.ROUND
             strokeJoin = Paint.Join.ROUND
             strokeWidth = 56f
-            xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
         }
         private val softReturnPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(8, 255, 255, 255)
+            color = Color.argb(4, 0, 0, 0)
             style = Paint.Style.FILL
             maskFilter = BlurMaskFilter(52f, BlurMaskFilter.Blur.NORMAL)
+            xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
         }
         private val smoothReturnPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(1, 255, 255, 255)
+            color = Color.argb(4, 0, 0, 0)
             style = Paint.Style.FILL
+            xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
         }
         private val aestheticGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.FILL
@@ -156,10 +160,10 @@ class FogMirrorWallpaperService : WallpaperService() {
         }
 
         private fun createSurfaceBuffers() {
-            // The mask stores where fog is still present. Transparent pixels are wiped glass.
+            // The mask stores cleared glass. Transparent pixels leave the original fog untouched.
             fogMask = Bitmap.createBitmap(surfaceWidth, surfaceHeight, Bitmap.Config.ARGB_8888)
             fogMaskCanvas = Canvas(fogMask)
-            fogMaskCanvas.drawColor(Color.argb(INITIAL_FOG_ALPHA, 255, 255, 255))
+            fogMaskCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
             condensationNoise = createCondensationNoise(surfaceWidth, surfaceHeight)
             configureCenterCropMatrix()
         }
@@ -219,7 +223,7 @@ class FogMirrorWallpaperService : WallpaperService() {
         }
 
         private fun drawFogLayer(canvas: Canvas) {
-            // Draw the blurred photo and condensation texture, then clip them through the live fog mask.
+            // Draw the blurred photo and condensation texture, then punch out wiped areas.
             val layer = canvas.saveLayer(0f, 0f, surfaceWidth.toFloat(), surfaceHeight.toFloat(), null)
             canvas.drawBitmap(fogBitmap, imageMatrix, fogPaint)
             canvas.drawBitmap(condensationNoise, 0f, 0f, null)
@@ -261,16 +265,11 @@ class FogMirrorWallpaperService : WallpaperService() {
         }
 
         private fun returnFogNonUniformly(dt: Float) {
-            // Restore the fog as a smooth six-second fade with faint circular condensation variation.
+            // Fade the clear mask away over six seconds; the untouched original fog naturally returns.
             if (secondsSinceTouch < 0.08f) return
-            if (secondsSinceTouch >= FOG_RECOVERY_SECONDS) {
-                fogReturnAccumulator = 0f
-                fogMaskCanvas.drawColor(Color.argb(INITIAL_FOG_ALPHA, 255, 255, 255), PorterDuff.Mode.SRC)
-                return
-            }
 
             val progress = (secondsSinceTouch / FOG_RECOVERY_SECONDS).coerceIn(0f, 1f)
-            smoothReturnPaint.alpha = if (progress < 0.72f) 1 else 2
+            smoothReturnPaint.alpha = if (progress < 1f) 4 else 6
             fogMaskCanvas.drawRect(0f, 0f, surfaceWidth.toFloat(), surfaceHeight.toFloat(), smoothReturnPaint)
 
             fogReturnAccumulator += dt
