@@ -23,6 +23,7 @@ import kotlin.random.Random
 class FogMirrorWallpaperService : WallpaperService() {
     private companion object {
         private const val INITIAL_FOG_ALPHA = 178
+        private const val FOG_RECOVERY_SECONDS = 6f
     }
 
     override fun onCreateEngine(): Engine = FogMirrorEngine()
@@ -78,6 +79,10 @@ class FogMirrorWallpaperService : WallpaperService() {
             color = Color.argb(8, 255, 255, 255)
             style = Paint.Style.FILL
             maskFilter = BlurMaskFilter(52f, BlurMaskFilter.Blur.NORMAL)
+        }
+        private val smoothReturnPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(1, 255, 255, 255)
+            style = Paint.Style.FILL
         }
         private val aestheticGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.FILL
@@ -256,19 +261,23 @@ class FogMirrorWallpaperService : WallpaperService() {
         }
 
         private fun returnFogNonUniformly(dt: Float) {
-            // Wait after touch, then restore fog with faint circular patches so clear wipes stay clean.
-            if (secondsSinceTouch < 0.28f) return
+            // Restore the fog as a smooth six-second fade with faint circular condensation variation.
+            if (secondsSinceTouch < 0.08f) return
+            val progress = (secondsSinceTouch / FOG_RECOVERY_SECONDS).coerceIn(0f, 1f)
+            smoothReturnPaint.alpha = if (progress < 1f) 1 else 2
+            fogMaskCanvas.drawRect(0f, 0f, surfaceWidth.toFloat(), surfaceHeight.toFloat(), smoothReturnPaint)
+
             fogReturnAccumulator += dt
-            if (fogReturnAccumulator < 0.012f) return
+            if (fogReturnAccumulator < 0.055f) return
             val patchBudget = fogReturnAccumulator
             fogReturnAccumulator = 0f
-            val patches = max(2, (patchBudget * 170f).toInt())
+            val patches = max(1, (patchBudget * 24f).toInt())
             repeat(patches) {
-                softReturnPaint.alpha = random.nextInt(7, 17)
+                softReturnPaint.alpha = random.nextInt(2, 5)
                 fogMaskCanvas.drawCircle(
                     random.nextFloat(0f, surfaceWidth.toFloat()),
                     random.nextFloat(0f, surfaceHeight.toFloat()),
-                    random.nextFloat(42f, 118f),
+                    random.nextFloat(70f, 165f),
                     softReturnPaint
                 )
             }
