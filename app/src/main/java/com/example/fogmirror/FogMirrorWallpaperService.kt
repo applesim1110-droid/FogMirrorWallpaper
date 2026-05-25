@@ -18,7 +18,6 @@ import android.view.MotionEvent
 import android.view.SurfaceHolder
 import kotlin.math.hypot
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.random.Random
 
 class FogMirrorWallpaperService : WallpaperService() {
@@ -28,11 +27,9 @@ class FogMirrorWallpaperService : WallpaperService() {
 
     override fun onCreateEngine(): Engine = FogMirrorEngine()
 
-    private inner class FogMirrorEngine : Engine() {
+        private inner class FogMirrorEngine : Engine() {
         private val handler = Handler(Looper.getMainLooper())
         private val random = Random(System.nanoTime())
-        private val wetStrokes = mutableListOf<WetStroke>()
-        private val drips = mutableListOf<Drip>()
 
         private var visible = false
         private var surfaceWidth = 1
@@ -84,28 +81,6 @@ class FogMirrorWallpaperService : WallpaperService() {
         }
         private val aestheticGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.FILL
-        }
-        private val wetTrailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeCap = Paint.Cap.ROUND
-            strokeJoin = Paint.Join.ROUND
-            maskFilter = BlurMaskFilter(7f, BlurMaskFilter.Blur.NORMAL)
-        }
-        private val wetHighlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeCap = Paint.Cap.ROUND
-            strokeJoin = Paint.Join.ROUND
-            color = Color.argb(108, 255, 255, 255)
-        }
-        private val dripPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeCap = Paint.Cap.ROUND
-            maskFilter = BlurMaskFilter(5f, BlurMaskFilter.Blur.NORMAL)
-        }
-        private val dripBeadPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.FILL
-            color = Color.argb(135, 255, 255, 255)
-            maskFilter = BlurMaskFilter(3f, BlurMaskFilter.Blur.NORMAL)
         }
 
         override fun onCreate(surfaceHolder: SurfaceHolder) {
@@ -207,7 +182,6 @@ class FogMirrorWallpaperService : WallpaperService() {
             lastFrameNanos = now
 
             secondsSinceTouch += dt
-            updateWetGlass(dt)
             returnFogNonUniformly(dt)
 
             val holder = surfaceHolder
@@ -225,7 +199,6 @@ class FogMirrorWallpaperService : WallpaperService() {
                 canvas.drawBitmap(clearBitmap, imageMatrix, clearPaint)
                 drawFogLayer(canvas)
                 drawSoftAestheticGlow(canvas)
-                drawWetGlass(canvas)
             } finally {
                 holder.unlockCanvasAndPost(canvas)
             }
@@ -277,25 +250,6 @@ class FogMirrorWallpaperService : WallpaperService() {
                 val y = startY + (endY - startY) * smoothT
                 fogMaskCanvas.drawLine(previousX, previousY, x, y, wipePaint)
                 fogMaskCanvas.drawLine(previousX, previousY, x, y, wipeCorePaint)
-                wetStrokes += WetStroke(
-                    startX = previousX,
-                    startY = previousY,
-                    endX = x,
-                    endY = y,
-                    width = random.nextFloat(14f, 24f) * pressure.coerceIn(0.7f, 1.2f)
-                )
-                if (random.nextFloat() < 0.055f && drips.size < 18) {
-                    drips += Drip(
-                        x = x + random.nextFloatSigned(11f),
-                        y = y,
-                        startY = y,
-                        length = random.nextFloat(18f, 54f),
-                        width = random.nextFloat(5f, 11f),
-                        velocity = random.nextFloat(28f, 68f),
-                        gravity = random.nextFloat(70f, 125f),
-                        lean = random.nextFloatSigned(4f)
-                    )
-                }
                 previousX = x
                 previousY = y
             }
@@ -303,18 +257,18 @@ class FogMirrorWallpaperService : WallpaperService() {
 
         private fun returnFogNonUniformly(dt: Float) {
             // Wait after touch, then restore fog with faint circular patches so clear wipes stay clean.
-            if (secondsSinceTouch < 1.35f) return
+            if (secondsSinceTouch < 0.28f) return
             fogReturnAccumulator += dt
-            if (fogReturnAccumulator < 0.04f) return
+            if (fogReturnAccumulator < 0.012f) return
             val patchBudget = fogReturnAccumulator
             fogReturnAccumulator = 0f
-            val patches = max(1, (patchBudget * 36f).toInt())
+            val patches = max(2, (patchBudget * 170f).toInt())
             repeat(patches) {
-                softReturnPaint.alpha = random.nextInt(3, 8)
+                softReturnPaint.alpha = random.nextInt(7, 17)
                 fogMaskCanvas.drawCircle(
                     random.nextFloat(0f, surfaceWidth.toFloat()),
                     random.nextFloat(0f, surfaceHeight.toFloat()),
-                    random.nextFloat(90f, 210f),
+                    random.nextFloat(42f, 118f),
                     softReturnPaint
                 )
             }
@@ -336,63 +290,6 @@ class FogMirrorWallpaperService : WallpaperService() {
             )
             canvas.drawRect(0f, 0f, surfaceWidth.toFloat(), surfaceHeight.toFloat(), aestheticGlowPaint)
             aestheticGlowPaint.shader = null
-        }
-
-        private fun updateWetGlass(dt: Float) {
-            val strokeIterator = wetStrokes.iterator()
-            while (strokeIterator.hasNext()) {
-                val stroke = strokeIterator.next()
-                stroke.age += dt
-                if (stroke.age > 7.5f) strokeIterator.remove()
-            }
-
-            val dripIterator = drips.iterator()
-            while (dripIterator.hasNext()) {
-                val drip = dripIterator.next()
-                drip.age += dt
-                drip.velocity = min(360f, drip.velocity + drip.gravity * dt)
-                drip.y += drip.velocity * dt
-                drip.length = min(260f, drip.length + drip.velocity * dt * 0.32f)
-                if (drip.y - drip.length > surfaceHeight || drip.age > 9f) dripIterator.remove()
-            }
-        }
-
-        private fun drawWetGlass(canvas: Canvas) {
-            for (stroke in wetStrokes) {
-                val fade = (1f - stroke.age / 7.5f).coerceIn(0f, 1f)
-                wetTrailPaint.strokeWidth = stroke.width
-                wetTrailPaint.color = Color.argb((64 * fade).toInt(), 0, 0, 0)
-                canvas.drawLine(stroke.startX, stroke.startY, stroke.endX, stroke.endY, wetTrailPaint)
-
-                wetHighlightPaint.strokeWidth = max(2f, stroke.width * 0.28f)
-                wetHighlightPaint.alpha = (86 * fade).toInt().coerceIn(0, 86)
-                canvas.drawLine(
-                    stroke.startX - 2f,
-                    stroke.startY - 2f,
-                    stroke.endX - 2f,
-                    stroke.endY - 2f,
-                    wetHighlightPaint
-                )
-            }
-
-            for (drip in drips) {
-                val fade = (1f - drip.age / 9f).coerceIn(0f, 1f)
-                val top = max(drip.startY, drip.y - drip.length)
-                dripPaint.strokeWidth = drip.width
-                dripPaint.shader = LinearGradient(
-                    drip.x,
-                    top,
-                    drip.x,
-                    drip.y,
-                    Color.argb((85 * fade).toInt(), 255, 255, 255),
-                    Color.argb((92 * fade).toInt(), 0, 0, 0),
-                    Shader.TileMode.CLAMP
-                )
-                canvas.drawLine(drip.x, top, drip.x + drip.lean, drip.y, dripPaint)
-                dripPaint.shader = null
-                dripBeadPaint.alpha = (145 * fade).toInt().coerceIn(0, 145)
-                canvas.drawCircle(drip.x, drip.y, drip.width * 1.12f, dripBeadPaint)
-            }
         }
 
         private fun createCondensationNoise(width: Int, height: Int): Bitmap {
@@ -433,26 +330,6 @@ class FogMirrorWallpaperService : WallpaperService() {
         }
     }
 
-    private data class WetStroke(
-        val startX: Float,
-        val startY: Float,
-        val endX: Float,
-        val endY: Float,
-        val width: Float,
-        var age: Float = 0f
-    )
-
-    private data class Drip(
-        val x: Float,
-        var y: Float,
-        val startY: Float,
-        var length: Float,
-        val width: Float,
-        var velocity: Float,
-        val gravity: Float,
-        val lean: Float,
-        var age: Float = 0f
-    )
 }
 
 private fun Random.nextFloat(min: Float, max: Float): Float = min + nextFloat() * (max - min)
