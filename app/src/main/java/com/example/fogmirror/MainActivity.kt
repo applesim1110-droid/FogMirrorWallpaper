@@ -9,13 +9,10 @@ import android.content.Intent
 import android.graphics.*
 import android.net.Uri
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
-import kotlin.math.hypot
 
 class MainActivity : Activity() {
 
@@ -53,7 +50,15 @@ class MainActivity : Activity() {
         initViews()
         loadSettings()
         setupListeners()
-        updatePreview()
+        
+        // Detect if opened from Wallpaper Settings or directly
+        val isFromSettings = intent.action == Intent.ACTION_MAIN && intent.component?.className == "com.example.fogmirror.MainActivity"
+        // Actually, the wallpaper picker just launches the activity. 
+        // If we have a background image, we can default to preview mode.
+        val prefs = getSharedPreferences("wallpaper_prefs", Context.MODE_PRIVATE)
+        if (prefs.contains("background_uri")) {
+            switchToPreviewMode(true)
+        }
     }
 
     private fun initViews() {
@@ -116,8 +121,19 @@ class MainActivity : Activity() {
 
     private fun createRGBSeekBar(parent: ViewGroup, label: String, initial: Int): SeekBar {
         val tv = TextView(this).apply { text = label; setPadding(0, 8, 0, 0) }
-        val sb = SeekBar(this).apply { max = 255; progress = initial }
+        val tvVal = TextView(this).apply { text = initial.toString(); setPadding(0, 0, 0, 0) }
+        val sb = SeekBar(this).apply { 
+            max = 255; progress = initial 
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(p0: SeekBar?, p: Int, fromUser: Boolean) {
+                    tvVal.text = p.toString()
+                }
+                override fun onStartTrackingTouch(p0: SeekBar?) {}
+                override fun onStopTrackingTouch(p0: SeekBar?) {}
+            })
+        }
         parent.addView(tv)
+        parent.addView(tvVal)
         parent.addView(sb)
         return sb
     }
@@ -178,8 +194,7 @@ class MainActivity : Activity() {
             override fun onStopTrackingTouch(seekBar: SeekBar?) { saveSettings() }
         })
 
-        // Setup touch listener for live sweep preview
-        previewFog.setOnTouchListener { v, event ->
+        previewFog.setOnTouchListener { _, event ->
             handlePreviewTouch(event)
             true
         }
@@ -223,7 +238,6 @@ class MainActivity : Activity() {
                 
                 previewFogBmp = blurForPreview(bmp)
                 
-                // Reset interaction mask
                 maskBmp = Bitmap.createBitmap(bmp.width, bmp.height, Bitmap.Config.ALPHA_8)
                 maskCanvas = Canvas(maskBmp!!)
                 
@@ -254,12 +268,10 @@ class MainActivity : Activity() {
         val avgR = (r / pixels.size).toInt(); val avgG = (g / pixels.size).toInt(); val avgB = (b / pixels.size).toInt()
         val avgLum = (lum / pixels.size).toInt()
 
-        // Balance color
         val balR = (210 * 0.7f + avgR * 0.3f).toInt().coerceIn(0, 255)
         val balG = (215 * 0.7f + avgG * 0.3f).toInt().coerceIn(0, 255)
         val balB = (220 * 0.7f + avgB * 0.3f).toInt().coerceIn(0, 255)
 
-        // Balanced density: If background is dark, make fog lighter/thinner. If light, make it denser.
         currentDensity = if (avgLum < 100) 180 else 235
         currentColor = Color.argb(currentDensity, balR, balG, balB)
         
@@ -273,15 +285,12 @@ class MainActivity : Activity() {
         val result = Bitmap.createBitmap(fog.width, fog.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(result)
         
-        // 1. Draw fog base
         val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         canvas.drawBitmap(fog, 0f, 0f, p)
         
-        // 2. Draw tint
-        val tint = if (isAuto) Color.argb(currentDensity, 205, 210, 215) else currentColor
+        val tint = if (isAuto) currentColor else currentColor
         canvas.drawColor(tint, PorterDuff.Mode.SRC_ATOP)
         
-        // 3. Subtract interaction mask (sweep animation)
         val mPaint = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT) }
         canvas.drawBitmap(mask, 0f, 0f, mPaint)
         
