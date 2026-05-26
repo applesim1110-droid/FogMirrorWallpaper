@@ -264,10 +264,13 @@ class MainActivity : Activity() {
                     currentDensity = progress
                     currentColor = Color.argb(currentDensity, Color.red(currentColor), Color.green(currentColor), Color.blue(currentColor))
                     renderCompositePreview()
+                    saveSettings() // Save instantly for live wallpaper update
                 }
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) { saveSettings() }
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                // saveSettings() already handled in progressChanged for real-time response
+            }
         })
 
         previewFog.setOnTouchListener { _, event ->
