@@ -46,7 +46,12 @@ class CropActivity : Activity() {
                 }
                 
                 val prefs = getSharedPreferences("wallpaper_prefs", MODE_PRIVATE)
-                prefs.edit().putString("background_uri", Uri.fromFile(file).toString()).apply()
+                // Add timestamp to URI to force the Service to detect a change every time
+                val newUri = Uri.fromFile(file).buildUpon()
+                    .appendQueryParameter("v", System.currentTimeMillis().toString())
+                    .build()
+                
+                prefs.edit().putString("background_uri", newUri.toString()).apply()
                 
                 setResult(RESULT_OK)
             }
