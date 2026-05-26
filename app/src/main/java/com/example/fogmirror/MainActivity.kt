@@ -120,32 +120,55 @@ class MainActivity : Activity() {
         
         // Large Color Preview
         val previewCircle = View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(250, 250).apply {
+            layoutParams = LinearLayout.LayoutParams(200, 200).apply {
                 gravity = android.view.Gravity.CENTER
-                setMargins(0, 0, 0, 40)
+                setMargins(0, 0, 0, 30)
             }
             setBackgroundColor(currentColor)
         }
         layout.addView(previewCircle)
+
+        // RGB Sliders first so hex watcher can find them
+        val rSeek = createRGBSeekBar(layout, "Red", Color.red(currentColor))
+        val gSeek = createRGBSeekBar(layout, "Green", Color.green(currentColor))
+        val bSeek = createRGBSeekBar(layout, "Blue", Color.blue(currentColor))
 
         // Hex Input
         val hexInput = EditText(this).apply {
             hint = "#RRGGBB"
             setText(String.format("#%06X", (0xFFFFFF and currentColor)))
             gravity = android.view.Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                setMargins(0, 20, 0, 0)
+            }
+            
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    try {
+                        val color = Color.parseColor(s.toString())
+                        previewCircle.setBackgroundColor(color)
+                        // Disable seek listener temporarily to avoid loops
+                        rSeek.progress = Color.red(color)
+                        gSeek.progress = Color.green(color)
+                        bSeek.progress = Color.blue(color)
+                    } catch (e: Exception) {}
+                }
+                override fun afterTextChanged(s: Editable?) {}
+            })
         }
         layout.addView(hexInput)
-
-        val rSeek = createRGBSeekBar(layout, "Red", Color.red(currentColor))
-        val gSeek = createRGBSeekBar(layout, "Green", Color.green(currentColor))
-        val bSeek = createRGBSeekBar(layout, "Blue", Color.blue(currentColor))
 
         val rgbListener = object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(p0: SeekBar?, p: Int, fromUser: Boolean) {
                 if (fromUser) {
                     val color = Color.rgb(rSeek.progress, gSeek.progress, bSeek.progress)
                     previewCircle.setBackgroundColor(color)
-                    hexInput.setText(String.format("#%06X", (0xFFFFFF and color)))
+                    // Update hex without triggering watcher loop (or let it loop if logic handles it)
+                    val hex = String.format("#%06X", (0xFFFFFF and color))
+                    if (hexInput.text.toString().uppercase() != hex) {
+                        hexInput.setText(hex)
+                    }
                 }
             }
             override fun onStartTrackingTouch(p0: SeekBar?) {}
