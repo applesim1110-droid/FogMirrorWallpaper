@@ -1,6 +1,7 @@
 package com.example.fogmirror
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.app.WallpaperManager
 import android.content.ComponentName
 import android.content.Context
@@ -10,7 +11,6 @@ import android.net.Uri
 import android.os.Bundle
 import android.view.View
 import android.widget.*
-import java.io.File
 
 class MainActivity : Activity() {
 
@@ -53,19 +53,64 @@ class MainActivity : Activity() {
         )
 
         for (color in colors) {
-            val view = View(this).apply {
-                layoutParams = LinearLayout.LayoutParams(120, 120).apply {
-                    setMargins(0, 0, 16, 0)
-                }
-                setBackgroundColor(color)
-                setOnClickListener {
-                    currentColor = Color.argb(currentDensity, Color.red(color), Color.green(color), Color.blue(color))
-                    saveSettings()
-                    updatePreview()
-                }
-            }
-            colorLayout.addView(view)
+            addColorPreset(color)
         }
+
+        // Add Custom Color Picker button
+        val customButton = Button(this).apply {
+            text = getString(R.string.custom_color)
+            setOnClickListener {
+                showColorPickerDialog()
+            }
+        }
+        colorLayout.addView(customButton)
+    }
+
+    private fun addColorPreset(color: Int) {
+        val view = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(120, 120).apply {
+                setMargins(0, 0, 16, 0)
+            }
+            setBackgroundColor(color)
+            setOnClickListener {
+                currentColor = Color.argb(currentDensity, Color.red(color), Color.green(color), Color.blue(color))
+                saveSettings()
+                updatePreview()
+            }
+        }
+        colorLayout.addView(view)
+    }
+
+    private fun showColorPickerDialog() {
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(50, 50, 50, 50)
+        }
+
+        val rText = TextView(this).apply { text = "Red" }
+        val rSeek = SeekBar(this).apply { max = 255; progress = Color.red(currentColor) }
+        val gText = TextView(this).apply { text = "Green" }
+        val gSeek = SeekBar(this).apply { max = 255; progress = Color.green(currentColor) }
+        val bText = TextView(this).apply { text = "Blue" }
+        val bSeek = SeekBar(this).apply { max = 255; progress = Color.blue(currentColor) }
+
+        layout.addView(rText)
+        layout.addView(rSeek)
+        layout.addView(gText)
+        layout.addView(gSeek)
+        layout.addView(bText)
+        layout.addView(bSeek)
+
+        AlertDialog.Builder(this)
+            .setTitle("Pick Custom Fog Color")
+            .setView(layout)
+            .setPositiveButton("Set") { _, _ ->
+                currentColor = Color.argb(currentDensity, rSeek.progress, gSeek.progress, bSeek.progress)
+                saveSettings()
+                updatePreview()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun loadSettings() {
@@ -140,14 +185,10 @@ class MainActivity : Activity() {
                     val bmp = BitmapFactory.decodeStream(stream)
                     previewBg.setImageBitmap(bmp)
                     
-                    // Generate a blurred preview
                     val blurred = blurForPreview(bmp)
                     previewFog.setImageBitmap(blurred)
                     
-                    // Apply fog tint and density
                     if (isAuto) {
-                        // In auto mode, we'd need to run the same logic as the service
-                        // For preview simplicity, just use the balanced grey
                         previewFog.setColorFilter(Color.argb(currentDensity, 205, 210, 215), PorterDuff.Mode.SRC_ATOP)
                     } else {
                         previewFog.setColorFilter(currentColor, PorterDuff.Mode.SRC_ATOP)
