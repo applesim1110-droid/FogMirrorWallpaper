@@ -78,8 +78,8 @@ class FogMirrorWallpaperService : WallpaperService() {
 
         private fun createFallbackFog(): Bitmap {
             val bmp = Bitmap.createBitmap(512, 512, Bitmap.Config.ARGB_8888)
-            // Using a warmer, slightly desaturated amber/sepia tone to match the orange tint
-            Canvas(bmp).drawColor(Color.argb(235, 180, 170, 160))
+            // Balanced neutral grey: subtle cool hint but high enough white/grey to not clash with warm background
+            Canvas(bmp).drawColor(Color.argb(235, 205, 210, 215))
             return bmp
         }
 
@@ -271,9 +271,9 @@ class FogMirrorWallpaperService : WallpaperService() {
             val paint = Paint().apply {
                 shader = LinearGradient(
                     0f, 0f, w.toFloat(), h.toFloat(),
-                    // Warm desaturated tones for a more aesthetic look with the orange background
-                    Color.argb(130, 160, 150, 140),
-                    Color.argb(170, 110, 100, 95),
+                    // Neutral airy tones: Soft grey with a touch of silver
+                    Color.argb(130, 190, 195, 200),
+                    Color.argb(170, 160, 165, 170),
                     Shader.TileMode.CLAMP
                 )
             }
