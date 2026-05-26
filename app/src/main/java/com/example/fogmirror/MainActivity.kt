@@ -9,8 +9,6 @@ import android.content.Intent
 import android.graphics.*
 import android.net.Uri
 import android.os.Bundle
-import android.text.Editable
-import android.text.TextWatcher
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -27,14 +25,12 @@ class MainActivity : Activity() {
     private lateinit var layoutManual: LinearLayout
     private lateinit var sbDensity: SeekBar
     private lateinit var colorLayout: LinearLayout
-    
-    private lateinit var customColorPreview: View
 
     private var currentDensity = 235
     private var currentColor = Color.argb(235, 205, 210, 215)
     private var isAuto = true
 
-    // Interactive Preview State
+    // Interactive Preview State (Cached Bitmaps)
     private var previewClearBmp: Bitmap? = null
     private var previewFogBmp: Bitmap? = null
     private var previewNoiseBmp: Bitmap? = null
@@ -80,13 +76,6 @@ class MainActivity : Activity() {
         )
         for (color in colors) addColorPreset(color)
 
-        // Add Custom Color Preview Circle
-        customColorPreview = View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(100, 100).apply { setMargins(16, 0, 8, 0) }
-            setBackgroundColor(currentColor)
-        }
-        colorLayout.addView(customColorPreview)
-
         val customButton = Button(this).apply {
             text = getString(R.string.custom_color)
             setOnClickListener { showColorPickerDialog() }
@@ -99,12 +88,7 @@ class MainActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(100, 100).apply { setMargins(0, 0, 16, 0) }
             setBackgroundColor(color)
             setOnClickListener {
-                isAuto = false
-                cbAutoFog.isChecked = false
-                layoutManual.visibility = View.VISIBLE
-                
                 currentColor = Color.argb(currentDensity, Color.red(color), Color.green(color), Color.blue(color))
-                customColorPreview.setBackgroundColor(currentColor)
                 saveSettings()
                 renderCompositePreview()
             }
@@ -115,79 +99,17 @@ class MainActivity : Activity() {
     private fun showColorPickerDialog() {
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(60, 40, 60, 40)
+            setPadding(50, 50, 50, 50)
         }
-        
-        // Large Color Preview
-        val previewCircle = View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(200, 200).apply {
-                gravity = android.view.Gravity.CENTER
-                setMargins(0, 0, 0, 30)
-            }
-            setBackgroundColor(currentColor)
-        }
-        layout.addView(previewCircle)
-
-        // RGB Sliders first so hex watcher can find them
         val rSeek = createRGBSeekBar(layout, "Red", Color.red(currentColor))
         val gSeek = createRGBSeekBar(layout, "Green", Color.green(currentColor))
         val bSeek = createRGBSeekBar(layout, "Blue", Color.blue(currentColor))
-
-        // Hex Input
-        val hexInput = EditText(this).apply {
-            hint = "#RRGGBB"
-            setText(String.format("#%06X", (0xFFFFFF and currentColor)))
-            gravity = android.view.Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                setMargins(0, 20, 0, 0)
-            }
-            
-            addTextChangedListener(object : TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    try {
-                        val color = Color.parseColor(s.toString())
-                        previewCircle.setBackgroundColor(color)
-                        // Disable seek listener temporarily to avoid loops
-                        rSeek.progress = Color.red(color)
-                        gSeek.progress = Color.green(color)
-                        bSeek.progress = Color.blue(color)
-                    } catch (e: Exception) {}
-                }
-                override fun afterTextChanged(s: Editable?) {}
-            })
-        }
-        layout.addView(hexInput)
-
-        val rgbListener = object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(p0: SeekBar?, p: Int, fromUser: Boolean) {
-                if (fromUser) {
-                    val color = Color.rgb(rSeek.progress, gSeek.progress, bSeek.progress)
-                    previewCircle.setBackgroundColor(color)
-                    // Update hex without triggering watcher loop (or let it loop if logic handles it)
-                    val hex = String.format("#%06X", (0xFFFFFF and color))
-                    if (hexInput.text.toString().uppercase() != hex) {
-                        hexInput.setText(hex)
-                    }
-                }
-            }
-            override fun onStartTrackingTouch(p0: SeekBar?) {}
-            override fun onStopTrackingTouch(p0: SeekBar?) {}
-        }
-        rSeek.setOnSeekBarChangeListener(rgbListener)
-        gSeek.setOnSeekBarChangeListener(rgbListener)
-        bSeek.setOnSeekBarChangeListener(rgbListener)
 
         AlertDialog.Builder(this)
             .setTitle("Custom Fog Color")
             .setView(layout)
             .setPositiveButton("Set") { _, _ ->
-                isAuto = false
-                cbAutoFog.isChecked = false
-                layoutManual.visibility = View.VISIBLE
-                
                 currentColor = Color.argb(currentDensity, rSeek.progress, gSeek.progress, bSeek.progress)
-                customColorPreview.setBackgroundColor(currentColor)
                 saveSettings()
                 renderCompositePreview()
             }
@@ -197,8 +119,19 @@ class MainActivity : Activity() {
 
     private fun createRGBSeekBar(parent: ViewGroup, label: String, initial: Int): SeekBar {
         val tv = TextView(this).apply { text = label; setPadding(0, 8, 0, 0) }
-        val sb = SeekBar(this).apply { max = 255; progress = initial }
+        val tvVal = TextView(this).apply { text = initial.toString(); setPadding(0, 0, 0, 0) }
+        val sb = SeekBar(this).apply { 
+            max = 255; progress = initial 
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(p0: SeekBar?, p: Int, fromUser: Boolean) {
+                    tvVal.text = p.toString()
+                }
+                override fun onStartTrackingTouch(p0: SeekBar?) {}
+                override fun onStopTrackingTouch(p0: SeekBar?) {}
+            })
+        }
         parent.addView(tv)
+        parent.addView(tvVal)
         parent.addView(sb)
         return sb
     }
@@ -212,7 +145,6 @@ class MainActivity : Activity() {
         cbAutoFog.isChecked = isAuto
         layoutManual.visibility = if (isAuto) View.GONE else View.VISIBLE
         sbDensity.progress = currentDensity
-        customColorPreview.setBackgroundColor(currentColor)
     }
 
     private fun saveSettings() {
@@ -244,33 +176,27 @@ class MainActivity : Activity() {
         cbAutoFog.setOnCheckedChangeListener { _, isChecked ->
             isAuto = isChecked
             layoutManual.visibility = if (isChecked) View.GONE else View.VISIBLE
+            saveSettings()
             
+            // Re-calculate or re-load based on toggle
             if (isAuto) {
                 previewClearBmp?.let { calculateAutoDensityAndColor(it) }
             } else {
-                loadSettings()
+                loadSettings() // Restore manual values
             }
-            saveSettings()
             renderCompositePreview()
         }
 
         sbDensity.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 if (fromUser) {
-                    isAuto = false
-                    cbAutoFog.isChecked = false
-                    layoutManual.visibility = View.VISIBLE
-                    
                     currentDensity = progress
                     currentColor = Color.argb(currentDensity, Color.red(currentColor), Color.green(currentColor), Color.blue(currentColor))
                     renderCompositePreview()
-                    saveSettings() // Save instantly for live wallpaper update
                 }
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {
-                // saveSettings() already handled in progressChanged for real-time response
-            }
+            override fun onStopTrackingTouch(seekBar: SeekBar?) { saveSettings() }
         })
 
         previewFog.setOnTouchListener { _, event ->
@@ -330,6 +256,11 @@ class MainActivity : Activity() {
         } catch (e: Exception) {}
     }
 
+    private fun updatePreview() {
+        // Fast update: just re-render composite without reloading bitmaps
+        renderCompositePreview()
+    }
+
     private fun calculateAutoDensityAndColor(src: Bitmap) {
         val sampleSize = 100
         val x = (src.width / 2 - sampleSize / 2).coerceAtLeast(0)
@@ -356,7 +287,6 @@ class MainActivity : Activity() {
         currentColor = Color.argb(currentDensity, balR, balG, balB)
         
         sbDensity.progress = currentDensity
-        customColorPreview.setBackgroundColor(currentColor)
     }
 
     private fun renderCompositePreview() {
@@ -376,13 +306,11 @@ class MainActivity : Activity() {
         canvas.drawBitmap(fog, 0f, 0f, fPaint)
         
         // 2. Tint Balance
-        val tintAlpha = (currentDensity * 0.4f).toInt()
-        val balancePaint = Paint().apply { color = currentColor; alpha = tintAlpha }
+        val balancePaint = Paint().apply { color = currentColor; alpha = 100 }
         canvas.drawRect(0f, 0f, fog.width.toFloat(), fog.height.toFloat(), balancePaint)
         
         // 3. Noise Texture
-        val noiseAlpha = (currentDensity * 0.5f).toInt().coerceAtMost(130)
-        val nPaint = Paint().apply { alpha = noiseAlpha }
+        val nPaint = Paint().apply { alpha = 130 }
         canvas.drawBitmap(noise, 0f, 0f, nPaint)
         
         // 4. Interaction Mask (DST_OUT)
