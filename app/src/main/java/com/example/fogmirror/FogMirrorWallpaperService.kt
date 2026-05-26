@@ -69,6 +69,8 @@ class FogMirrorWallpaperService : WallpaperService() {
             alpha = 130
         }
 
+        private val balancePaint = Paint()
+
         override fun onCreate(holder: SurfaceHolder) {
             super.onCreate(holder)
             setTouchEventsEnabled(true)
@@ -107,6 +109,9 @@ class FogMirrorWallpaperService : WallpaperService() {
                 fogDensity = prefs.getInt("fog_density", DEFAULT_FOG_ALPHA)
                 fogColor = prefs.getInt("fog_color", Color.argb(235, 205, 210, 215))
                 fogPaint.alpha = fogDensity
+                noisePaint.alpha = (fogDensity * 0.5f).toInt()
+                balancePaint.color = fogColor
+                balancePaint.alpha = (fogDensity * 0.4f).toInt()
             }
         }
 
@@ -160,6 +165,9 @@ class FogMirrorWallpaperService : WallpaperService() {
             fogDensity = if (avgLum < 100) 180 else 235
             fogColor = Color.argb(fogDensity, balR, balG, balB)
             fogPaint.alpha = fogDensity
+            noisePaint.alpha = (fogDensity * 0.5f).toInt()
+            balancePaint.color = fogColor
+            balancePaint.alpha = (fogDensity * 0.4f).toInt()
         }
 
         private fun blurBitmapHighRes(src: Bitmap): Bitmap {
@@ -262,7 +270,6 @@ class FogMirrorWallpaperService : WallpaperService() {
         private fun drawFog(canvas: Canvas) {
             val layer = canvas.saveLayer(0f, 0f, surfaceWidth.toFloat(), surfaceHeight.toFloat(), null)
             canvas.drawBitmap(fogBitmap, matrix, fogPaint)
-            val balancePaint = Paint().apply { color = fogColor; alpha = 100 }
             canvas.drawRect(0f, 0f, surfaceWidth.toFloat(), surfaceHeight.toFloat(), balancePaint)
             canvas.drawBitmap(noiseBitmap, 0f, 0f, noisePaint)
             for (s in strokes) {

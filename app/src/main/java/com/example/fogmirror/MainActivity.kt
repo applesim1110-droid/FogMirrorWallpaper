@@ -305,12 +305,14 @@ class MainActivity : Activity() {
         }
         canvas.drawBitmap(fog, 0f, 0f, fPaint)
         
-        // 2. Tint Balance
-        val balancePaint = Paint().apply { color = currentColor; alpha = 100 }
+        // 2. Tint Balance (Scale alpha relative to density)
+        val tintAlpha = (currentDensity * 0.4f).toInt()
+        val balancePaint = Paint().apply { color = currentColor; alpha = tintAlpha }
         canvas.drawRect(0f, 0f, fog.width.toFloat(), fog.height.toFloat(), balancePaint)
         
-        // 3. Noise Texture
-        val nPaint = Paint().apply { alpha = 130 }
+        // 3. Noise Texture (Scale alpha relative to density)
+        val noiseAlpha = (currentDensity * 0.5f).toInt()
+        val nPaint = Paint().apply { alpha = noiseAlpha }
         canvas.drawBitmap(noise, 0f, 0f, nPaint)
         
         // 4. Interaction Mask (DST_OUT)
