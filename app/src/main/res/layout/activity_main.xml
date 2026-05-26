@@ -1,135 +1,174 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
     android:background="#F5F5F5">
 
-    <!-- Fixed Preview Area at Top -->
-    <FrameLayout
-        android:id="@+id/preview_container"
+    <!-- Stage 1: Landing Page -->
+    <LinearLayout
+        android:id="@+id/layout_landing"
         android:layout_width="match_parent"
-        android:layout_height="250dp"
-        android:background="#EEEEEE">
-
-        <ImageView
-            android:id="@+id/img_preview_bg"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:scaleType="centerCrop" />
-
-        <ImageView
-            android:id="@+id/img_preview_fog"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:scaleType="centerCrop" />
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:padding="24dp"
+        android:visibility="visible">
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="@string/preview_hint"
-            android:textColor="#FFFFFF"
-            android:background="#88000000"
-            android:padding="4dp"
-            android:layout_gravity="bottom|end" />
-    </FrameLayout>
+            android:text="@string/app_name"
+            android:textSize="32sp"
+            android:textStyle="bold"
+            android:textColor="#333333"
+            android:layout_marginBottom="64dp" />
 
-    <ScrollView
+        <Button
+            android:id="@+id/btn_pick_image_main"
+            android:layout_width="match_parent"
+            android:layout_height="64dp"
+            android:text="@string/pick_image"
+            android:layout_marginBottom="24dp"
+            android:backgroundTint="#607D8B"
+            android:textColor="#FFFFFF" />
+
+        <Button
+            android:id="@+id/btn_go_to_customize"
+            android:layout_width="match_parent"
+            android:layout_height="64dp"
+            android:text="Customize &amp; Set Wallpaper"
+            android:backgroundTint="#2196F3"
+            android:textColor="#FFFFFF" />
+
+    </LinearLayout>
+
+    <!-- Stage 2: Full Preview & Adjustment Mode -->
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:id="@+id/layout_preview_mode"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1">
+        android:layout_height="match_parent"
+        android:visibility="gone"
+        android:background="#000000">
 
-        <LinearLayout
+        <!-- Full Window Preview -->
+        <ImageView
+            android:id="@+id/img_preview_bg"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:scaleType="centerCrop"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+
+        <ImageView
+            android:id="@+id/img_preview_fog"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:scaleType="centerCrop"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+
+        <ImageButton
+            android:id="@+id/btn_back_to_main"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_margin="16dp"
+            android:background="#88000000"
+            android:src="@android:drawable/ic_menu_revert"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+
+        <!-- Control Panel -->
+        <androidx.cardview.widget.CardView
+            android:id="@+id/control_panel"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="20dp">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/app_name"
-                android:textSize="24sp"
-                android:textStyle="bold"
-                android:textColor="#333333"
-                android:layout_gravity="center"
-                android:layout_marginBottom="24dp" />
-
-            <Button
-                android:id="@+id/btn_pick_image"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/pick_image"
-                android:layout_marginBottom="24dp" />
+            android:layout_margin="16dp"
+            app:cardBackgroundColor="#CCFFFFFF"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="8dp"
+            app:layout_constraintBottom_toBottomOf="parent">
 
             <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:layout_marginBottom="16dp">
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="@string/auto_fog"
-                    android:textSize="16sp" />
-
-                <CheckBox
-                    android:id="@+id/cb_auto_fog"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:checked="true" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/layout_manual_controls"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:visibility="gone">
+                android:padding="16dp">
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/fog_density"
-                    android:layout_marginBottom="4dp" />
-
-                <SeekBar
-                    android:id="@+id/sb_density"
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:max="255"
-                    android:progress="235"
-                    android:layout_marginBottom="16dp" />
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="8dp">
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/fog_color"
-                    android:layout_marginBottom="8dp" />
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/auto_fog"
+                        android:textColor="#333333"
+                        android:textStyle="bold" />
 
-                <HorizontalScrollView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginBottom="24dp">
-
-                    <LinearLayout
-                        android:id="@+id/layout_color_presets"
+                    <CheckBox
+                        android:id="@+id/cb_auto_fog"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical" />
-                </HorizontalScrollView>
+                        android:checked="true" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/layout_manual_controls"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/fog_density"
+                        android:textSize="12sp"
+                        android:textColor="#666666" />
+
+                    <SeekBar
+                        android:id="@+id/sb_density"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="255"
+                        android:progress="235" />
+
+                    <HorizontalScrollView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp">
+
+                        <LinearLayout
+                            android:id="@+id/layout_color_presets"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:paddingBottom="8dp" />
+                    </HorizontalScrollView>
+                </LinearLayout>
+
+                <Button
+                    android:id="@+id/btn_apply_wallpaper"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/set_wallpaper"
+                    android:backgroundTint="#2196F3"
+                    android:textColor="#FFFFFF"
+                    android:layout_marginTop="8dp" />
+
             </LinearLayout>
+        </androidx.cardview.widget.CardView>
 
-            <Button
-                android:id="@+id/btn_set_wallpaper"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/set_wallpaper" />
+    </androidx.constraintlayout.widget.ConstraintLayout>
 
-        </LinearLayout>
-    </ScrollView>
-</LinearLayout>
+</androidx.constraintlayout.widget.ConstraintLayout>
