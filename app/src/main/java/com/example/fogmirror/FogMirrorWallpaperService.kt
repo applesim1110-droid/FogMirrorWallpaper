@@ -1,16 +1,6 @@
 package com.example.fogmirror
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.BlurMaskFilter
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.LinearGradient
-import android.graphics.Matrix
-import android.graphics.Paint
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffXfermode
-import android.graphics.Shader
+import android.graphics.*
 import android.os.Handler
 import android.os.Looper
 import android.service.wallpaper.WallpaperService
@@ -18,91 +8,85 @@ import android.view.MotionEvent
 import android.view.SurfaceHolder
 import kotlin.math.hypot
 import kotlin.math.max
-import kotlin.random.Random
 
 class FogMirrorWallpaperService : WallpaperService() {
-    private companion object {
-        private const val INITIAL_FOG_ALPHA = 178
-        private const val FOG_RECOVERY_SECONDS = 6f
+
+    companion object {
+        private const val INITIAL_FOG_ALPHA = 235
+        private const val WIPE_FADE_SECONDS = 15f
+        private const val MAX_STROKES = 20
     }
 
-    override fun onCreateEngine(): Engine = FogMirrorEngine()
+    override fun onCreateEngine(): Engine = FogEngine()
 
-        private inner class FogMirrorEngine : Engine() {
+    private data class WipeStroke(
+        val bitmap: Bitmap,
+        var time: Float
+    )
+
+    private inner class FogEngine : Engine() {
+
         private val handler = Handler(Looper.getMainLooper())
-        private val random = Random(System.nanoTime())
 
         private var visible = false
         private var surfaceWidth = 1
         private var surfaceHeight = 1
-        private var lastFrameNanos = 0L
-        private var fogReturnAccumulator = 0f
-        private var secondsSinceTouch = 999f
+        private var lastFrameTime = 0L
+
         private var lastTouchX = 0f
         private var lastTouchY = 0f
         private var hasLastTouch = false
 
         private lateinit var clearBitmap: Bitmap
         private lateinit var fogBitmap: Bitmap
-        private lateinit var condensationNoise: Bitmap
-        private lateinit var fogMask: Bitmap
-        private lateinit var fogMaskCanvas: Canvas
+        private lateinit var noiseBitmap: Bitmap
 
-        private val imageMatrix = Matrix()
-        private val frameRunnable = object : Runnable {
-            override fun run() {
-                drawFrame()
-            }
-        }
+        private val strokes = mutableListOf<WipeStroke>()
+
+        private val matrix = Matrix()
+        private val frameRunnable = Runnable { drawFrame() }
 
         private val clearPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+
         private val fogPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
             alpha = INITIAL_FOG_ALPHA
         }
-        private val maskPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
-        }
+
         private val wipePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
             style = Paint.Style.STROKE
             strokeCap = Paint.Cap.ROUND
-            strokeJoin = Paint.Join.ROUND
-            strokeWidth = 96f
-            maskFilter = BlurMaskFilter(38f, BlurMaskFilter.Blur.NORMAL)
-        }
-        private val wipeCorePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            style = Paint.Style.STROKE
-            strokeCap = Paint.Cap.ROUND
-            strokeJoin = Paint.Join.ROUND
-            strokeWidth = 56f
-        }
-        private val softReturnPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(4, 0, 0, 0)
-            style = Paint.Style.FILL
-            maskFilter = BlurMaskFilter(52f, BlurMaskFilter.Blur.NORMAL)
-            xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
-        }
-        private val smoothReturnPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(4, 0, 0, 0)
-            style = Paint.Style.FILL
-            xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
-        }
-        private val aestheticGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.FILL
+            strokeWidth = 90f
+            maskFilter = BlurMaskFilter(30f, BlurMaskFilter.Blur.NORMAL)
         }
 
-        override fun onCreate(surfaceHolder: SurfaceHolder) {
-            super.onCreate(surfaceHolder)
+        private val noisePaint = Paint().apply {
+            alpha = 130
+        }
+
+        override fun onCreate(holder: SurfaceHolder) {
+            super.onCreate(holder)
             setTouchEventsEnabled(true)
+
+            // Safely decode or provide fallback to prevent crashes if files are missing/corrupted
             clearBitmap = BitmapFactory.decodeResource(resources, R.drawable.mirror_clear)
+                ?: Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+
             fogBitmap = BitmapFactory.decodeResource(resources, R.drawable.fog_blur)
+                ?: createFallbackFog()
+        }
+
+        private fun createFallbackFog(): Bitmap {
+            val bmp = Bitmap.createBitmap(512, 512, Bitmap.Config.ARGB_8888)
+            // Using a warmer, slightly desaturated amber/sepia tone to match the orange tint
+            Canvas(bmp).drawColor(Color.argb(235, 180, 170, 160))
+            return bmp
         }
 
         override fun onVisibilityChanged(visible: Boolean) {
             this.visible = visible
             if (visible) {
-                lastFrameNanos = System.nanoTime()
+                lastFrameTime = System.nanoTime()
                 drawFrame()
             } else {
                 handler.removeCallbacks(frameRunnable)
@@ -117,7 +101,7 @@ class FogMirrorWallpaperService : WallpaperService() {
         ) {
             surfaceWidth = max(1, width)
             surfaceHeight = max(1, height)
-            createSurfaceBuffers()
+            createBuffers()
             drawFrame()
         }
 
@@ -127,225 +111,175 @@ class FogMirrorWallpaperService : WallpaperService() {
             super.onSurfaceDestroyed(holder)
         }
 
-        override fun onDestroy() {
-            handler.removeCallbacks(frameRunnable)
-            super.onDestroy()
-        }
-
         override fun onTouchEvent(event: MotionEvent) {
             when (event.actionMasked) {
+
                 MotionEvent.ACTION_DOWN -> {
-                    secondsSinceTouch = 0f
-                    hasLastTouch = true
-                    lastTouchX = event.x
-                    lastTouchY = event.y
-                    wipeSegment(event.x, event.y, event.x, event.y, 0.65f)
+                    startNewStroke(event.x, event.y)
                 }
 
                 MotionEvent.ACTION_MOVE -> {
-                    secondsSinceTouch = 0f
-                    for (i in 0 until event.historySize) {
-                        val x = event.getHistoricalX(i)
-                        val y = event.getHistoricalY(i)
-                        wipeFromLastPoint(x, y)
-                    }
-                    wipeFromLastPoint(event.x, event.y)
+                    drawOnLatest(event.x, event.y)
                 }
 
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                MotionEvent.ACTION_UP -> {
                     hasLastTouch = false
                 }
             }
-            super.onTouchEvent(event)
         }
 
-        private fun createSurfaceBuffers() {
-            // The mask stores cleared glass. Transparent pixels leave the original fog untouched.
-            fogMask = Bitmap.createBitmap(surfaceWidth, surfaceHeight, Bitmap.Config.ARGB_8888)
-            fogMaskCanvas = Canvas(fogMask)
-            fogMaskCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
-            condensationNoise = createCondensationNoise(surfaceWidth, surfaceHeight)
-            configureCenterCropMatrix()
+        private fun createBuffers() {
+            noiseBitmap = createNoise(surfaceWidth, surfaceHeight)
+            setupMatrix()
         }
 
-        private fun configureCenterCropMatrix() {
+        private fun setupMatrix() {
             val scale = max(
                 surfaceWidth / clearBitmap.width.toFloat(),
                 surfaceHeight / clearBitmap.height.toFloat()
             )
-            val dx = (surfaceWidth - clearBitmap.width * scale) * 0.5f
-            val dy = (surfaceHeight - clearBitmap.height * scale) * 0.5f
-            imageMatrix.reset()
-            imageMatrix.postScale(scale, scale)
-            imageMatrix.postTranslate(dx, dy)
+
+            val dx = (surfaceWidth - clearBitmap.width * scale) / 2f
+            val dy = (surfaceHeight - clearBitmap.height * scale) / 2f
+
+            matrix.reset()
+            matrix.postScale(scale, scale)
+            matrix.postTranslate(dx, dy)
         }
 
-        private fun drawFrame() {
-            if (!visible) return
-            if (!::fogMask.isInitialized || fogMask.width != surfaceWidth || fogMask.height != surfaceHeight) {
-                createSurfaceBuffers()
+        private fun startNewStroke(x: Float, y: Float) {
+            if (strokes.size >= MAX_STROKES) {
+                strokes.removeAt(0)
             }
 
-            val now = System.nanoTime()
-            val dt = ((now - lastFrameNanos) / 1_000_000_000f).coerceIn(0.001f, 0.05f)
-            lastFrameNanos = now
+            // Use ALPHA_8 to save memory (1 byte per pixel vs 4)
+            // Essential for high-resolution tablets to avoid OutOfMemoryError
+            val bmp = Bitmap.createBitmap(surfaceWidth, surfaceHeight, Bitmap.Config.ALPHA_8)
+            val stroke = WipeStroke(bmp, 0f)
 
-            secondsSinceTouch += dt
-            returnFogNonUniformly(dt)
+            strokes.add(stroke)
 
-            val holder = surfaceHolder
-            val canvas = try {
-                holder.lockHardwareCanvas()
-            } catch (_: Exception) {
-                null
-            } ?: run {
-                scheduleNextFrame()
-                return
-            }
+            lastTouchX = x
+            lastTouchY = y
+            hasLastTouch = true
 
-            try {
-                canvas.drawColor(Color.BLACK)
-                canvas.drawBitmap(clearBitmap, imageMatrix, clearPaint)
-                drawFogLayer(canvas)
-                drawSoftAestheticGlow(canvas)
-            } finally {
-                holder.unlockCanvasAndPost(canvas)
-            }
-
-            scheduleNextFrame()
+            drawOnStroke(stroke, x, y, x, y)
         }
 
-        private fun scheduleNextFrame() {
-            handler.removeCallbacks(frameRunnable)
-            if (visible) {
-                handler.postDelayed(frameRunnable, 16L)
-            }
-        }
+        private fun drawOnLatest(x: Float, y: Float) {
+            if (!hasLastTouch || strokes.isEmpty()) return
 
-        private fun drawFogLayer(canvas: Canvas) {
-            // Draw the blurred photo and condensation texture, then punch out wiped areas.
-            val layer = canvas.saveLayer(0f, 0f, surfaceWidth.toFloat(), surfaceHeight.toFloat(), null)
-            canvas.drawBitmap(fogBitmap, imageMatrix, fogPaint)
-            canvas.drawBitmap(condensationNoise, 0f, 0f, null)
-            canvas.drawBitmap(fogMask, 0f, 0f, maskPaint)
-            canvas.restoreToCount(layer)
-        }
+            val stroke = strokes.last()
+            drawOnStroke(stroke, lastTouchX, lastTouchY, x, y)
 
-        private fun wipeFromLastPoint(x: Float, y: Float) {
-            if (!hasLastTouch) {
-                lastTouchX = x
-                lastTouchY = y
-                hasLastTouch = true
-            }
-            val distance = hypot(x - lastTouchX, y - lastTouchY)
-            wipeSegment(lastTouchX, lastTouchY, x, y, (distance / 115f).coerceIn(0.3f, 1.25f))
             lastTouchX = x
             lastTouchY = y
         }
 
-        private fun wipeSegment(startX: Float, startY: Float, endX: Float, endY: Float, pressure: Float) {
-            // A soft outer brush plus a clean inner brush reveals the image without watery artifacts.
-            val distance = hypot(endX - startX, endY - startY)
-            val steps = max(1, (distance / 18f).toInt())
-            var previousX = startX
-            var previousY = startY
-            wipePaint.strokeWidth = 94f * pressure.coerceIn(0.55f, 1.15f)
-            wipeCorePaint.strokeWidth = 52f * pressure.coerceIn(0.55f, 1.15f)
+        private fun drawOnStroke(
+            stroke: WipeStroke,
+            sx: Float,
+            sy: Float,
+            ex: Float,
+            ey: Float
+        ) {
+            val canvas = Canvas(stroke.bitmap)
 
-            for (step in 1..steps) {
-                val t = step / steps.toFloat()
-                val smoothT = t * t * (3f - 2f * t)
-                val x = startX + (endX - startX) * smoothT
-                val y = startY + (endY - startY) * smoothT
-                fogMaskCanvas.drawLine(previousX, previousY, x, y, wipePaint)
-                fogMaskCanvas.drawLine(previousX, previousY, x, y, wipeCorePaint)
-                previousX = x
-                previousY = y
+            val steps = max(1, (hypot(ex - sx, ey - sy) / 18f).toInt())
+
+            var px = sx
+            var py = sy
+
+            for (i in 1..steps) {
+                val t = i / steps.toFloat()
+                val x = sx + (ex - sx) * t
+                val y = sy + (ey - sy) * t
+
+                canvas.drawLine(px, py, x, y, wipePaint)
+
+                px = x
+                py = y
             }
         }
 
-        private fun returnFogNonUniformly(dt: Float) {
-            // Fade the clear mask away over six seconds; the untouched original fog naturally returns.
-            if (secondsSinceTouch < 0.08f) return
+        private fun drawFrame() {
+            if (!visible) return
 
-            val progress = (secondsSinceTouch / FOG_RECOVERY_SECONDS).coerceIn(0f, 1f)
-            smoothReturnPaint.alpha = if (progress < 1f) 4 else 6
-            fogMaskCanvas.drawRect(0f, 0f, surfaceWidth.toFloat(), surfaceHeight.toFloat(), smoothReturnPaint)
+            val now = System.nanoTime()
+            val dt = ((now - lastFrameTime) / 1_000_000_000f)
+                .coerceIn(0.001f, 0.05f)
 
-            fogReturnAccumulator += dt
-            if (fogReturnAccumulator < 0.055f) return
-            val patchBudget = fogReturnAccumulator
-            fogReturnAccumulator = 0f
-            val patches = max(1, (patchBudget * 24f).toInt())
-            repeat(patches) {
-                softReturnPaint.alpha = random.nextInt(2, 5)
-                fogMaskCanvas.drawCircle(
-                    random.nextFloat(0f, surfaceWidth.toFloat()),
-                    random.nextFloat(0f, surfaceHeight.toFloat()),
-                    random.nextFloat(70f, 165f),
-                    softReturnPaint
-                )
+            lastFrameTime = now
+
+            // update strokes independently
+            val iterator = strokes.iterator()
+            while (iterator.hasNext()) {
+                val s = iterator.next()
+                s.time += dt
+
+                if (s.time >= WIPE_FADE_SECONDS) {
+                    iterator.remove()
+                }
             }
+
+            val canvas = surfaceHolder.lockHardwareCanvas() ?: return
+
+            canvas.drawColor(Color.BLACK)
+            canvas.drawBitmap(clearBitmap, matrix, clearPaint)
+
+            drawFog(canvas)
+
+            surfaceHolder.unlockCanvasAndPost(canvas)
+
+            handler.postDelayed(frameRunnable, 16)
         }
 
-        private fun drawSoftAestheticGlow(canvas: Canvas) {
-            aestheticGlowPaint.shader = LinearGradient(
-                0f,
-                0f,
+        private fun drawFog(canvas: Canvas) {
+            val layer = canvas.saveLayer(
+                0f, 0f,
                 surfaceWidth.toFloat(),
                 surfaceHeight.toFloat(),
-                intArrayOf(
-                    Color.argb(22, 255, 255, 255),
-                    Color.argb(0, 255, 255, 255),
-                    Color.argb(28, 185, 215, 225)
-                ),
-                floatArrayOf(0f, 0.52f, 1f),
-                Shader.TileMode.CLAMP
+                null
             )
-            canvas.drawRect(0f, 0f, surfaceWidth.toFloat(), surfaceHeight.toFloat(), aestheticGlowPaint)
-            aestheticGlowPaint.shader = null
+
+            // fog layer
+            canvas.drawBitmap(fogBitmap, matrix, fogPaint)
+
+            // texture
+            canvas.drawBitmap(noiseBitmap, 0f, 0f, noisePaint)
+
+            // apply strokes independently
+            for (s in strokes) {
+                val progress = (s.time / WIPE_FADE_SECONDS)
+                    .coerceIn(0f, 1f)
+
+                val paint = Paint().apply {
+                    xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
+                    alpha = ((1f - progress) * 255).toInt()
+                }
+
+                canvas.drawBitmap(s.bitmap, 0f, 0f, paint)
+            }
+
+            canvas.restoreToCount(layer)
         }
 
-        private fun createCondensationNoise(width: Int, height: Int): Bitmap {
-            // Static noise breaks up the flat blurred image into cloudy condensation.
-            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(bitmap)
-            val mistPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        private fun createNoise(w: Int, h: Int): Bitmap {
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            val c = Canvas(bmp)
+
+            val paint = Paint().apply {
                 shader = LinearGradient(
-                    0f,
-                    0f,
-                    width.toFloat(),
-                    height.toFloat(),
-                    Color.argb(105, 245, 250, 248),
-                    Color.argb(145, 210, 226, 229),
+                    0f, 0f, w.toFloat(), h.toFloat(),
+                    // Warm desaturated tones for a more aesthetic look with the orange background
+                    Color.argb(130, 160, 150, 140),
+                    Color.argb(170, 110, 100, 95),
                     Shader.TileMode.CLAMP
                 )
             }
-            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), mistPaint)
 
-            val speckPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                style = Paint.Style.FILL
-                maskFilter = BlurMaskFilter(2.5f, BlurMaskFilter.Blur.NORMAL)
-            }
-            val speckCount = (width * height / 1050f).toInt().coerceIn(600, 3800)
-            repeat(speckCount) {
-                val alpha = random.nextInt(12, 55)
-                val gray = random.nextInt(205, 256)
-                speckPaint.color = Color.argb(alpha, gray, gray, gray)
-                val radius = random.nextFloat(0.8f, 4.7f)
-                canvas.drawCircle(
-                    random.nextFloat(0f, width.toFloat()),
-                    random.nextFloat(0f, height.toFloat()),
-                    radius,
-                    speckPaint
-                )
-            }
-            return bitmap
+            c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), paint)
+            return bmp
         }
     }
-
 }
-
-private fun Random.nextFloat(min: Float, max: Float): Float = min + nextFloat() * (max - min)
-
-private fun Random.nextFloatSigned(magnitude: Float): Float = nextFloat(-magnitude, magnitude)
