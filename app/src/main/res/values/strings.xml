@@ -13,4 +13,10 @@
     <string name="fog_color">Fog Color</string>
     <string name="preview_hint">Live Preview</string>
     <string name="custom_color">Custom</string>
+    <string name="hex_code">Hex Code</string>
+    <string name="beautiful_palettes">Beautiful Palettes</string>
+    <string name="custom_fog_color">Custom Fog Color</string>
+    <string name="color_red">Red</string>
+    <string name="color_green">Green</string>
+    <string name="color_blue">Blue</string>
 </resources>

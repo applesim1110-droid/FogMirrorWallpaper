@@ -7,8 +7,12 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.*
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
+import android.text.Editable
+import android.text.TextWatcher
+import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -97,19 +101,126 @@ class MainActivity : Activity() {
     }
 
     private fun showColorPickerDialog() {
-        val layout = LinearLayout(this).apply {
+        val rootLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(50, 50, 50, 50)
+            setPadding(60, 40, 60, 40)
         }
-        val rSeek = createRGBSeekBar(layout, "Red", Color.red(currentColor))
-        val gSeek = createRGBSeekBar(layout, "Green", Color.green(currentColor))
-        val bSeek = createRGBSeekBar(layout, "Blue", Color.blue(currentColor))
+
+        // 1. Color Preview
+        val previewContainer = FrameLayout(this).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 200).apply {
+                setMargins(0, 0, 0, 40)
+            }
+        }
+        val colorPreview = View(this).apply {
+            setBackgroundColor(currentColor)
+            // Round corners via background drawable would be nice, but simple for now
+            background = GradientDrawable().apply {
+                setColor(currentColor)
+                cornerRadius = 24f
+                setStroke(2, Color.LTGRAY)
+            }
+        }
+        previewContainer.addView(colorPreview)
+        rootLayout.addView(previewContainer)
+
+        // 2. Hex Input
+        val hexLabel = TextView(this).apply { text = getString(R.string.hex_code); textSize = 14f; setTextColor(Color.GRAY) }
+        rootLayout.addView(hexLabel)
+        
+        val hexInput = EditText(this).apply {
+            val currentHex = String.format("#%06X", (0xFFFFFF and currentColor))
+            setText(currentHex)
+            maxLines = 1
+            gravity = Gravity.CENTER
+            textSize = 20f
+        }
+        rootLayout.addView(hexInput)
+
+        // 3. RGB Sliders
+        val slidersLayout = LinearLayout(this).apply { 
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 20, 0, 20)
+        }
+        
+        var isUpdatingFromSliders = false
+
+        fun updateColor(newColor: Int, fromHex: Boolean = false) {
+            currentColor = Color.argb(currentDensity, Color.red(newColor), Color.green(newColor), Color.blue(newColor))
+            (colorPreview.background as GradientDrawable).setColor(currentColor)
+            
+            if (!fromHex) {
+                isUpdatingFromSliders = true
+                hexInput.setText(String.format("#%06X", (0xFFFFFF and currentColor)))
+                isUpdatingFromSliders = false
+            }
+        }
+
+        val rSeek = createRGBSeekBar(slidersLayout, getString(R.string.color_red), Color.red(currentColor)) { val p = it; updateColor(Color.rgb(p, Color.green(currentColor), Color.blue(currentColor))) }
+        val gSeek = createRGBSeekBar(slidersLayout, getString(R.string.color_green), Color.green(currentColor)) { val p = it; updateColor(Color.rgb(Color.red(currentColor), p, Color.blue(currentColor))) }
+        val bSeek = createRGBSeekBar(slidersLayout, getString(R.string.color_blue), Color.blue(currentColor)) { val p = it; updateColor(Color.rgb(Color.red(currentColor), Color.green(currentColor), p)) }
+        
+        rootLayout.addView(slidersLayout)
+
+        // Hex Listener
+        hexInput.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                if (isUpdatingFromSliders) return
+                val hex = s.toString()
+                try {
+                    val parsedColor = Color.parseColor(if (hex.startsWith("#")) hex else "#$hex")
+                    rSeek.progress = Color.red(parsedColor)
+                    gSeek.progress = Color.green(parsedColor)
+                    bSeek.progress = Color.blue(parsedColor)
+                    updateColor(parsedColor, true)
+                } catch (e: Exception) {}
+            }
+        })
+
+        // 4. Quick Palette
+        val paletteLabel = TextView(this).apply { text = getString(R.string.beautiful_palettes); textSize = 14f; setTextColor(Color.GRAY); setPadding(0, 20, 0, 10) }
+        rootLayout.addView(paletteLabel)
+        
+        val paletteGrid = GridLayout(this).apply {
+            columnCount = 4
+            alignmentMode = GridLayout.ALIGN_BOUNDS
+        }
+        val paletteColors = intArrayOf(
+            Color.parseColor("#AED9E0"), Color.parseColor("#F7CED7"), Color.parseColor("#FDFCF0"), Color.parseColor("#65A34B"),
+            Color.parseColor("#91C9E8"), Color.parseColor("#D97706"), Color.parseColor("#3B82F6"), Color.parseColor("#FFFFFF"),
+            Color.parseColor("#CDD2D7"), Color.parseColor("#B4AAA0"), Color.parseColor("#DCE6F0"), Color.parseColor("#2D3436")
+        )
+        
+        for (color in paletteColors) {
+            val v = View(this).apply {
+                layoutParams = GridLayout.LayoutParams().apply {
+                    width = 100; height = 100
+                    setMargins(16, 16, 16, 16)
+                }
+                background = GradientDrawable().apply {
+                    setColor(color)
+                    cornerRadius = 60f
+                    setStroke(1, Color.LTGRAY)
+                }
+                setOnClickListener {
+                    rSeek.progress = Color.red(color)
+                    gSeek.progress = Color.green(color)
+                    bSeek.progress = Color.blue(color)
+                    updateColor(color)
+                }
+            }
+            paletteGrid.addView(v)
+        }
+        rootLayout.addView(paletteGrid)
+
+        val scroll = ScrollView(this).apply { addView(rootLayout) }
 
         AlertDialog.Builder(this)
-            .setTitle("Custom Fog Color")
-            .setView(layout)
+            .setTitle(R.string.custom_fog_color)
+            .setView(scroll)
             .setPositiveButton("Set") { _, _ ->
-                currentColor = Color.argb(currentDensity, rSeek.progress, gSeek.progress, bSeek.progress)
                 saveSettings()
                 renderCompositePreview()
             }
@@ -117,21 +228,25 @@ class MainActivity : Activity() {
             .show()
     }
 
-    private fun createRGBSeekBar(parent: ViewGroup, label: String, initial: Int): SeekBar {
-        val tv = TextView(this).apply { text = label; setPadding(0, 8, 0, 0) }
-        val tvVal = TextView(this).apply { text = initial.toString(); setPadding(0, 0, 0, 0) }
+    private fun createRGBSeekBar(parent: ViewGroup, label: String, initial: Int, onUpdate: (Int) -> Unit): SeekBar {
+        val labelLayout = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val tv = TextView(this).apply { text = label; setPadding(0, 8, 0, 0); layoutParams = LinearLayout.LayoutParams(0, -2, 1f) }
+        val tvVal = TextView(this).apply { text = initial.toString(); setPadding(0, 8, 0, 0) }
+        labelLayout.addView(tv)
+        labelLayout.addView(tvVal)
+        
         val sb = SeekBar(this).apply { 
             max = 255; progress = initial 
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(p0: SeekBar?, p: Int, fromUser: Boolean) {
                     tvVal.text = p.toString()
+                    if (fromUser) onUpdate(p)
                 }
                 override fun onStartTrackingTouch(p0: SeekBar?) {}
                 override fun onStopTrackingTouch(p0: SeekBar?) {}
             })
         }
-        parent.addView(tv)
-        parent.addView(tvVal)
+        parent.addView(labelLayout)
         parent.addView(sb)
         return sb
     }
