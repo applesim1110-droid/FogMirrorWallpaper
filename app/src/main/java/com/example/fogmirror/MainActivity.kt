@@ -30,7 +30,7 @@ class MainActivity : Activity() {
     private var currentColor = Color.argb(235, 205, 210, 215)
     private var isAuto = true
 
-    // Interactive Preview State (Cached Bitmaps)
+    // Interactive Preview State
     private var previewClearBmp: Bitmap? = null
     private var previewFogBmp: Bitmap? = null
     private var previewNoiseBmp: Bitmap? = null
@@ -88,6 +88,11 @@ class MainActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(100, 100).apply { setMargins(0, 0, 16, 0) }
             setBackgroundColor(color)
             setOnClickListener {
+                // Changing color automatically switches to manual mode
+                isAuto = false
+                cbAutoFog.isChecked = false
+                layoutManual.visibility = View.VISIBLE
+                
                 currentColor = Color.argb(currentDensity, Color.red(color), Color.green(color), Color.blue(color))
                 saveSettings()
                 renderCompositePreview()
@@ -109,6 +114,10 @@ class MainActivity : Activity() {
             .setTitle("Custom Fog Color")
             .setView(layout)
             .setPositiveButton("Set") { _, _ ->
+                isAuto = false
+                cbAutoFog.isChecked = false
+                layoutManual.visibility = View.VISIBLE
+                
                 currentColor = Color.argb(currentDensity, rSeek.progress, gSeek.progress, bSeek.progress)
                 saveSettings()
                 renderCompositePreview()
@@ -176,14 +185,17 @@ class MainActivity : Activity() {
         cbAutoFog.setOnCheckedChangeListener { _, isChecked ->
             isAuto = isChecked
             layoutManual.visibility = if (isChecked) View.GONE else View.VISIBLE
-            saveSettings()
             
-            // Re-calculate or re-load based on toggle
             if (isAuto) {
                 previewClearBmp?.let { calculateAutoDensityAndColor(it) }
             } else {
-                loadSettings() // Restore manual values
+                // Restore manual values from prefs
+                val prefs = getSharedPreferences("wallpaper_prefs", Context.MODE_PRIVATE)
+                currentDensity = prefs.getInt("fog_density", 235)
+                currentColor = prefs.getInt("fog_color", Color.argb(235, 205, 210, 215))
+                sbDensity.progress = currentDensity
             }
+            saveSettings()
             renderCompositePreview()
         }
 
@@ -256,11 +268,6 @@ class MainActivity : Activity() {
         } catch (e: Exception) {}
     }
 
-    private fun updatePreview() {
-        // Fast update: just re-render composite without reloading bitmaps
-        renderCompositePreview()
-    }
-
     private fun calculateAutoDensityAndColor(src: Bitmap) {
         val sampleSize = 100
         val x = (src.width / 2 - sampleSize / 2).coerceAtLeast(0)
@@ -299,21 +306,24 @@ class MainActivity : Activity() {
         
         val layer = canvas.saveLayer(0f, 0f, fog.width.toFloat(), fog.height.toFloat(), null)
         
-        // 1. Fog Bitmap
+        // 1. Fog Bitmap (Respect currentDensity)
         val fPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
             alpha = currentDensity
         }
         canvas.drawBitmap(fog, 0f, 0f, fPaint)
         
-        // 2. Tint Balance
-        val balancePaint = Paint().apply { color = currentColor; alpha = 100 }
+        // 2. Tint Balance (Respect currentDensity)
+        // Scaled alpha for tint so it doesn't overpower the blur
+        val tintAlpha = (currentDensity * 0.4f).toInt()
+        val balancePaint = Paint().apply { color = currentColor; alpha = tintAlpha }
         canvas.drawRect(0f, 0f, fog.width.toFloat(), fog.height.toFloat(), balancePaint)
         
-        // 3. Noise Texture
-        val nPaint = Paint().apply { alpha = 130 }
+        // 3. Noise Texture (Scaled with density)
+        val noiseAlpha = (currentDensity * 0.5f).toInt().coerceAtMost(130)
+        val nPaint = Paint().apply { alpha = noiseAlpha }
         canvas.drawBitmap(noise, 0f, 0f, nPaint)
         
-        // 4. Interaction Mask (DST_OUT)
+        // 4. Interaction Mask (Clears fog)
         val mPaint = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT) }
         canvas.drawBitmap(mask, 0f, 0f, mPaint)
         

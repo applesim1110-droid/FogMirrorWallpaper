@@ -99,7 +99,6 @@ class FogMirrorWallpaperService : WallpaperService() {
         private fun updateSettings() {
             val isAuto = prefs.getBoolean("auto_fog", true)
             if (isAuto) {
-                // If auto, re-calculate based on current clearBitmap
                 if (::clearBitmap.isInitialized) {
                     calculateAutoDensityAndColor(clearBitmap)
                 }
@@ -128,7 +127,7 @@ class FogMirrorWallpaperService : WallpaperService() {
             if (prefs.getBoolean("auto_fog", true)) {
                 calculateAutoDensityAndColor(clearBitmap)
             } else {
-                updateSettings() // Apply manual density
+                updateSettings()
             }
 
             fogBitmap = blurBitmapHighRes(clearBitmap)
@@ -261,10 +260,21 @@ class FogMirrorWallpaperService : WallpaperService() {
 
         private fun drawFog(canvas: Canvas) {
             val layer = canvas.saveLayer(0f, 0f, surfaceWidth.toFloat(), surfaceHeight.toFloat(), null)
+            
+            // 1. Fog Bitmap (Blurred Photo)
             canvas.drawBitmap(fogBitmap, matrix, fogPaint)
-            val balancePaint = Paint().apply { color = fogColor; alpha = 100 }
+            
+            // 2. Tint Balance (Scaled with fogDensity)
+            val tintAlpha = (fogDensity * 0.4f).toInt()
+            val balancePaint = Paint().apply { color = fogColor; alpha = tintAlpha }
             canvas.drawRect(0f, 0f, surfaceWidth.toFloat(), surfaceHeight.toFloat(), balancePaint)
-            canvas.drawBitmap(noiseBitmap, 0f, 0f, noisePaint)
+            
+            // 3. Noise Texture (Scaled with fogDensity)
+            val noiseAlpha = (fogDensity * 0.5f).toInt().coerceAtMost(130)
+            val nPaint = Paint().apply { alpha = noiseAlpha }
+            canvas.drawBitmap(noiseBitmap, 0f, 0f, nPaint)
+            
+            // 4. Interaction Mask
             for (s in strokes) {
                 val progress = (s.time / WIPE_FADE_SECONDS).coerceIn(0f, 1f)
                 val paint = Paint().apply {
