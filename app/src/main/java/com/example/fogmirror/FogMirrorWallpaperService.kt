@@ -15,7 +15,7 @@ import kotlin.math.max
 class FogMirrorWallpaperService : WallpaperService() {
 
     companion object {
-        private const val INITIAL_FOG_ALPHA = 235
+        private const val DEFAULT_FOG_ALPHA = 235
         private const val WIPE_FADE_SECONDS = 15f
         private const val MAX_STROKES = 20
     }
@@ -53,9 +53,9 @@ class FogMirrorWallpaperService : WallpaperService() {
         private val clearPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
         private var fogColor = Color.argb(235, 205, 210, 215)
-        private val fogPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
-            alpha = INITIAL_FOG_ALPHA
-        }
+        private var fogDensity = DEFAULT_FOG_ALPHA
+        
+        private val fogPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
         private val wipePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
@@ -73,6 +73,7 @@ class FogMirrorWallpaperService : WallpaperService() {
             super.onCreate(holder)
             setTouchEventsEnabled(true)
             prefs.registerOnSharedPreferenceChangeListener(this)
+            updateSettings()
             loadBitmaps()
         }
 
@@ -82,11 +83,28 @@ class FogMirrorWallpaperService : WallpaperService() {
         }
 
         override fun onSharedPreferenceChanged(p: SharedPreferences?, key: String?) {
-            if (key == "background_uri") {
-                loadBitmaps()
-                setupMatrix()
-                drawFrame()
+            when (key) {
+                "background_uri" -> {
+                    loadBitmaps()
+                    setupMatrix()
+                    drawFrame()
+                }
+                "auto_fog", "fog_density", "fog_color" -> {
+                    updateSettings()
+                    drawFrame()
+                }
             }
+        }
+
+        private fun updateSettings() {
+            val isAuto = prefs.getBoolean("auto_fog", true)
+            if (isAuto) {
+                // Settings will be updated in loadBitmaps -> updateBalancedFogColor
+            } else {
+                fogDensity = prefs.getInt("fog_density", DEFAULT_FOG_ALPHA)
+                fogColor = prefs.getInt("fog_color", Color.argb(235, 205, 210, 215))
+            }
+            fogPaint.alpha = fogDensity
         }
 
         private fun loadBitmaps() {
@@ -98,15 +116,16 @@ class FogMirrorWallpaperService : WallpaperService() {
                     val uri = Uri.parse(uriString)
                     val inputStream = contentResolver.openInputStream(uri)
                     loadedBitmap = BitmapFactory.decodeStream(inputStream)
-                } catch (e: Exception) {
-                    // Fallback
-                }
+                } catch (e: Exception) {}
             }
 
             clearBitmap = loadedBitmap ?: BitmapFactory.decodeResource(resources, R.drawable.mirror_clear)
                 ?: Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
 
-            updateBalancedFogColor(clearBitmap)
+            if (prefs.getBoolean("auto_fog", true)) {
+                updateBalancedFogColor(clearBitmap)
+            }
+
             fogBitmap = blurBitmapHighRes(clearBitmap)
         }
 
@@ -138,6 +157,8 @@ class FogMirrorWallpaperService : WallpaperService() {
             val balanceB = (220 * 0.7f + avgB * 0.3f).toInt().coerceIn(0, 255)
             
             fogColor = Color.argb(235, balanceR, balanceG, balanceB)
+            fogDensity = DEFAULT_FOG_ALPHA
+            fogPaint.alpha = fogDensity
         }
 
         private fun blurBitmapHighRes(src: Bitmap): Bitmap {

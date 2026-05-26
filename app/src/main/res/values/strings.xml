@@ -8,4 +8,8 @@
     <string name="image_selected">Background updated!</string>
     <string name="crop_title">Adjust Your Wallpaper</string>
     <string name="btn_done">Done</string>
+    <string name="auto_fog">Auto Fog Adjustment</string>
+    <string name="fog_density">Fog Density</string>
+    <string name="fog_color">Fog Color</string>
+    <string name="preview_hint">Live Preview</string>
 </resources>
