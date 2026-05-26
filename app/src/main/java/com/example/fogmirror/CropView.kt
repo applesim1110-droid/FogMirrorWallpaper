@@ -4,8 +4,8 @@ import android.content.Context
 import android.graphics.*
 import android.util.AttributeSet
 import android.view.MotionEvent
-import android.view.ScaleGestureDetector
 import android.view.View
+import kotlin.math.abs
 
 class CropView(context: Context, attrs: AttributeSet?) : View(context, attrs) {
 
@@ -25,41 +25,23 @@ class CropView(context: Context, attrs: AttributeSet?) : View(context, attrs) {
         style = Paint.Style.STROKE
         strokeWidth = 5f
     }
+    private val handlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        style = Paint.Style.FILL
+    }
 
     private var lastX = 0f
     private var lastY = 0f
-    private var isDraggingCrop = false
+    private var touchMode = TOUCH_NONE
 
-    private val scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
-        override fun onScale(detector: ScaleGestureDetector): Boolean {
-            val scaleFactor = detector.scaleFactor
-            val targetAspect = aspectX / aspectY
-            
-            val newWidth = cropRect.width() * scaleFactor
-            val newHeight = newWidth / targetAspect
-            
-            // Limit minimum size
-            if (newWidth < 100f || newHeight < 100f) return true
+    private val handleSize = 40f
+    private val touchTolerance = 60f
 
-            val centerX = cropRect.centerX()
-            val centerY = cropRect.centerY()
-            
-            val newRect = RectF(
-                centerX - newWidth / 2f,
-                centerY - newHeight / 2f,
-                centerX + newWidth / 2f,
-                centerY + newHeight / 2f
-            )
-
-            // Keep within view bounds
-            if (newRect.left >= 0 && newRect.top >= 0 && newRect.right <= width && newRect.bottom <= height) {
-                cropRect.set(newRect)
-            }
-            
-            invalidate()
-            return true
-        }
-    })
+    companion object {
+        private const val TOUCH_NONE = 0
+        private const val TOUCH_DRAG = 1
+        private const val TOUCH_RESIZE_BR = 2 // Bottom Right handle
+    }
 
     fun setBitmap(bitmap: Bitmap, initialPortrait: Boolean) {
         sourceBitmap = bitmap
@@ -72,11 +54,11 @@ class CropView(context: Context, attrs: AttributeSet?) : View(context, attrs) {
         val h = dm.heightPixels.toFloat()
         
         if (portrait) {
-            aspectX = Math.min(w, h)
-            aspectY = Math.max(w, h)
+            aspectX = minOf(w, h)
+            aspectY = maxOf(w, h)
         } else {
-            aspectX = Math.max(w, h)
-            aspectY = Math.min(w, h)
+            aspectX = maxOf(w, h)
+            aspectY = minOf(w, h)
         }
         resetCropRect()
         invalidate()
@@ -102,8 +84,7 @@ class CropView(context: Context, attrs: AttributeSet?) : View(context, attrs) {
         super.onSizeChanged(w, h, oldw, oldh)
         val bitmap = sourceBitmap ?: return
 
-        // Matrix to fit bitmap inside view (static)
-        val scale = Math.min(w.toFloat() / bitmap.width, h.toFloat() / bitmap.height)
+        val scale = minOf(w.toFloat() / bitmap.width, h.toFloat() / bitmap.height)
         val dx = (w - bitmap.width * scale) / 2f
         val dy = (h - bitmap.height * scale) / 2f
         drawMatrix.setScale(scale, scale)
@@ -118,7 +99,6 @@ class CropView(context: Context, attrs: AttributeSet?) : View(context, attrs) {
 
         canvas.drawBitmap(bitmap, drawMatrix, paint)
 
-        // Draw dark overlay around crop rect
         val layer = canvas.saveLayer(0f, 0f, width.toFloat(), height.toFloat(), null)
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), overlayPaint)
         
@@ -126,43 +106,58 @@ class CropView(context: Context, attrs: AttributeSet?) : View(context, attrs) {
         canvas.drawRect(cropRect, clearPaint)
         canvas.restoreToCount(layer)
 
-        // Draw crop border
         canvas.drawRect(cropRect, borderPaint)
+        
+        // Draw resize handle at bottom-right
+        canvas.drawCircle(cropRect.right, cropRect.bottom, handleSize / 2f, handlePaint)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        scaleDetector.onTouchEvent(event)
-        
-        if (scaleDetector.isInProgress) return true
-
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                if (cropRect.contains(event.x, event.y)) {
-                    lastX = event.x
-                    lastY = event.y
-                    isDraggingCrop = true
+                lastX = event.x
+                lastY = event.y
+                
+                // Check if touching bottom-right handle
+                if (abs(event.x - cropRect.right) < touchTolerance && abs(event.y - cropRect.bottom) < touchTolerance) {
+                    touchMode = TOUCH_RESIZE_BR
+                } else if (cropRect.contains(event.x, event.y)) {
+                    touchMode = TOUCH_DRAG
+                } else {
+                    touchMode = TOUCH_NONE
                 }
             }
             MotionEvent.ACTION_MOVE -> {
-                if (isDraggingCrop) {
-                    val dx = event.x - lastX
-                    val dy = event.y - lastY
-                    
+                val dx = event.x - lastX
+                val dy = event.y - lastY
+
+                if (touchMode == TOUCH_DRAG) {
                     val newRect = RectF(cropRect)
                     newRect.offset(dx, dy)
-                    
-                    // Constrain to view bounds
                     if (newRect.left >= 0 && newRect.top >= 0 && newRect.right <= width && newRect.bottom <= height) {
                         cropRect.set(newRect)
                     }
+                } else if (touchMode == TOUCH_RESIZE_BR) {
+                    val targetAspect = aspectX / aspectY
                     
-                    lastX = event.x
-                    lastY = event.y
-                    invalidate()
+                    // Resize based on X movement, maintain aspect ratio
+                    val newWidth = (cropRect.width() + dx).coerceAtLeast(100f)
+                    val newHeight = newWidth / targetAspect
+                    
+                    val newRect = RectF(cropRect.left, cropRect.top, cropRect.left + newWidth, cropRect.top + newHeight)
+                    
+                    // Constrain to view bounds
+                    if (newRect.right <= width && newRect.bottom <= height) {
+                        cropRect.set(newRect)
+                    }
                 }
+
+                lastX = event.x
+                lastY = event.y
+                invalidate()
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                isDraggingCrop = false
+                touchMode = TOUCH_NONE
             }
         }
         performClick()
