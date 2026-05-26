@@ -11,6 +11,33 @@
         android:layout_above="@+id/bottomBar" />
 
     <LinearLayout
+        android:id="@+id/orientationBar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_above="@+id/bottomBar"
+        android:layout_centerHorizontal="true"
+        android:layout_marginBottom="16dp"
+        android:background="#88000000"
+        android:orientation="horizontal"
+        android:padding="8dp">
+
+        <Button
+            android:id="@+id/btn_portrait"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Portrait"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/btn_landscape"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Landscape"
+            android:layout_marginStart="8dp"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <LinearLayout
         android:id="@+id/bottomBar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

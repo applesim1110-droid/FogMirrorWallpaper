@@ -5,7 +5,6 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
-import android.util.DisplayMetrics
 import android.widget.Button
 import java.io.File
 import java.io.FileOutputStream
@@ -25,12 +24,18 @@ class CropActivity : Activity() {
         val uri = Uri.parse(uriString)
         val inputStream = contentResolver.openInputStream(uri)
         val bitmap = BitmapFactory.decodeStream(inputStream)
-
-        val dm = DisplayMetrics()
-        windowManager.defaultDisplay.getMetrics(dm)
         
         val cropView = findViewById<CropView>(R.id.cropView)
-        cropView.setBitmap(bitmap, dm.widthPixels.toFloat(), dm.heightPixels.toFloat())
+        // Default to portrait but user can change
+        cropView.setBitmap(bitmap, true)
+
+        findViewById<Button>(R.id.btn_portrait).setOnClickListener {
+            cropView.setOrientation(true)
+        }
+
+        findViewById<Button>(R.id.btn_landscape).setOnClickListener {
+            cropView.setOrientation(false)
+        }
 
         findViewById<Button>(R.id.btn_done).setOnClickListener {
             val cropped = cropView.getCroppedBitmap()
