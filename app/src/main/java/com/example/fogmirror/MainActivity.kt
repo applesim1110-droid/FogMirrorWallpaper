@@ -9,8 +9,12 @@ import android.content.Intent
 import android.graphics.*
 import android.net.Uri
 import android.os.Bundle
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.View
+import android.view.ViewGroup
 import android.widget.*
+import java.util.*
 
 class MainActivity : Activity() {
 
@@ -60,7 +64,7 @@ class MainActivity : Activity() {
         val customButton = Button(this).apply {
             text = getString(R.string.custom_color)
             setOnClickListener {
-                showColorPickerDialog()
+                showAestheticColorPickerDialog()
             }
         }
         colorLayout.addView(customButton)
@@ -81,36 +85,105 @@ class MainActivity : Activity() {
         colorLayout.addView(view)
     }
 
-    private fun showColorPickerDialog() {
-        val layout = LinearLayout(this).apply {
+    private fun showAestheticColorPickerDialog() {
+        val rootLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(50, 50, 50, 50)
+            setPadding(60, 40, 60, 40)
         }
 
-        val rText = TextView(this).apply { text = "Red" }
-        val rSeek = SeekBar(this).apply { max = 255; progress = Color.red(currentColor) }
-        val gText = TextView(this).apply { text = "Green" }
-        val gSeek = SeekBar(this).apply { max = 255; progress = Color.green(currentColor) }
-        val bText = TextView(this).apply { text = "Blue" }
-        val bSeek = SeekBar(this).apply { max = 255; progress = Color.blue(currentColor) }
+        // Color Preview Circle
+        val previewCircle = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(250, 250).apply {
+                gravity = android.view.Gravity.CENTER
+                setMargins(0, 0, 0, 40)
+            }
+            setBackgroundColor(currentColor)
+        }
+        rootLayout.addView(previewCircle)
 
-        layout.addView(rText)
-        layout.addView(rSeek)
-        layout.addView(gText)
-        layout.addView(gSeek)
-        layout.addView(bText)
-        layout.addView(bSeek)
+        // Hex Code Input
+        val hexInput = EditText(this).apply {
+            hint = "#RRGGBB"
+            setText(String.format("#%06X", (0xFFFFFF and currentColor)))
+            gravity = android.view.Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                setMargins(0, 0, 0, 30)
+            }
+        }
+        rootLayout.addView(hexInput)
+
+        // Hue Slider (Palette)
+        val hueText = TextView(this).apply { text = "Hue Palette" }
+        rootLayout.addView(hueText)
+        
+        val hueSeek = SeekBar(this).apply {
+            max = 360
+            val hsv = FloatArray(3)
+            Color.colorToHSV(currentColor, hsv)
+            progress = hsv[0].toInt()
+        }
+        rootLayout.addView(hueSeek)
+
+        // RGB Sliders for fine tuning
+        val rSeek = createRGBSeekBar(rootLayout, "Red", Color.red(currentColor))
+        val gSeek = createRGBSeekBar(rootLayout, "Green", Color.green(currentColor))
+        val bSeek = createRGBSeekBar(rootLayout, "Blue", Color.blue(currentColor))
+
+        // Sync logic
+        val updatePreview = {
+            val color = Color.rgb(rSeek.progress, gSeek.progress, bSeek.progress)
+            previewCircle.setBackgroundColor(color)
+            hexInput.setText(String.format("#%06X", (0xFFFFFF and color)), TextView.BufferType.EDITABLE)
+        }
+
+        hueSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(p0: SeekBar?, p: Int, fromUser: Boolean) {
+                if (fromUser) {
+                    val color = Color.HSVToColor(floatArrayOf(p.toFloat(), 0.5f, 0.9f))
+                    rSeek.progress = Color.red(color)
+                    gSeek.progress = Color.green(color)
+                    bSeek.progress = Color.blue(color)
+                    previewCircle.setBackgroundColor(color)
+                }
+            }
+            override fun onStartTrackingTouch(p0: SeekBar?) {}
+            override fun onStopTrackingTouch(p0: SeekBar?) {}
+        })
+
+        val rgbListener = object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(p0: SeekBar?, p: Int, fromUser: Boolean) {
+                if (fromUser) {
+                    val color = Color.rgb(rSeek.progress, gSeek.progress, bSeek.progress)
+                    previewCircle.setBackgroundColor(color)
+                    // Update hex without triggering watcher loop
+                }
+            }
+            override fun onStartTrackingTouch(p0: SeekBar?) {}
+            override fun onStopTrackingTouch(p0: SeekBar?) {}
+        }
+        rSeek.setOnSeekBarChangeListener(rgbListener)
+        gSeek.setOnSeekBarChangeListener(rgbListener)
+        bSeek.setOnSeekBarChangeListener(rgbListener)
 
         AlertDialog.Builder(this)
-            .setTitle("Pick Custom Fog Color")
-            .setView(layout)
+            .setTitle("Custom Fog Color")
+            .setView(rootLayout)
             .setPositiveButton("Set") { _, _ ->
-                currentColor = Color.argb(currentDensity, rSeek.progress, gSeek.progress, bSeek.progress)
+                val finalColor = Color.rgb(rSeek.progress, gSeek.progress, bSeek.progress)
+                currentColor = Color.argb(currentDensity, Color.red(finalColor), Color.green(finalColor), Color.blue(finalColor))
                 saveSettings()
                 updatePreview()
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun createRGBSeekBar(parent: ViewGroup, label: String, initial: Int): SeekBar {
+        val tv = TextView(this).apply { text = label; setPadding(0, 10, 0, 0) }
+        val sb = SeekBar(this).apply { max = 255; progress = initial }
+        parent.addView(tv)
+        parent.addView(sb)
+        return sb
     }
 
     private fun loadSettings() {
