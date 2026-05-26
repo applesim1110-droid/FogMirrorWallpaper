@@ -17,6 +17,8 @@ class CropView(context: Context, attrs: AttributeSet?) : View(context, attrs) {
 
     private val cropRect = RectF()
     private val previewMatrix = Matrix()
+    private val imageBounds = RectF() // The bounds of the image on screen
+    
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val overlayPaint = Paint().apply {
         color = Color.BLACK
@@ -48,9 +50,8 @@ class CropView(context: Context, attrs: AttributeSet?) : View(context, attrs) {
     fun setBitmap(bitmap: Bitmap, initialPortrait: Boolean) {
         sourceBitmap = bitmap
         
-        // Create a downscaled preview bitmap to fix lag on high-res tablets
-        // 1024px is usually enough for a sharp preview without being too heavy
-        val maxPreviewDim = 1024
+        // Further reduce preview size to 800px to ensure zero lag on any tablet
+        val maxPreviewDim = 800
         val scale = minOf(maxPreviewDim.toFloat() / bitmap.width, maxPreviewDim.toFloat() / bitmap.height)
         
         previewBitmap = if (scale < 1f) {
@@ -84,47 +85,56 @@ class CropView(context: Context, attrs: AttributeSet?) : View(context, attrs) {
     }
 
     private fun resetCropRect() {
-        if (width == 0 || height == 0) return
+        if (width == 0 || height == 0 || imageBounds.isEmpty) return
+        
         val targetAspect = aspectX / aspectY
         var cropW: Float
         var cropH: Float
 
-        if (width.toFloat() / height > targetAspect) {
-            cropH = height * 0.8f
+        // Try to fit inside imageBounds initially
+        if (imageBounds.width() / imageBounds.height() > targetAspect) {
+            cropH = imageBounds.height() * 0.8f
             cropW = cropH * targetAspect
         } else {
-            cropW = width * 0.8f
+            cropW = imageBounds.width() * 0.8f
             cropH = cropW / targetAspect
         }
-        cropRect.set((width - cropW) / 2f, (height - cropH) / 2f, (width + cropW) / 2f, (height + cropH) / 2f)
+        
+        cropRect.set(
+            imageBounds.centerX() - cropW / 2f,
+            imageBounds.centerY() - cropH / 2f,
+            imageBounds.centerX() + cropW / 2f,
+            imageBounds.centerY() + cropH / 2f
+        )
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        updatePreviewMatrix(w, h)
-        resetCropRect()
-    }
-
-    private fun updatePreviewMatrix(w: Int, h: Int) {
         val bitmap = previewBitmap ?: return
+
         val scale = minOf(w.toFloat() / bitmap.width, h.toFloat() / bitmap.height)
         val dx = (w - bitmap.width * scale) / 2f
         val dy = (h - bitmap.height * scale) / 2f
+        
         previewMatrix.setScale(scale, scale)
         previewMatrix.postTranslate(dx, dy)
+        
+        // Pre-calculate image bounds on screen
+        imageBounds.set(dx, dy, dx + bitmap.width * scale, dy + bitmap.height * scale)
+        
+        resetCropRect()
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val bitmap = previewBitmap ?: return
 
-        // Drawing the downscaled preview is much smoother
         canvas.drawBitmap(bitmap, previewMatrix, paint)
 
         val w = width.toFloat()
         val h = height.toFloat()
         
-        // Draw 4-rect overlay (Fastest method)
+        // Fast 4-rect overlay
         canvas.drawRect(0f, 0f, w, cropRect.top, overlayPaint)
         canvas.drawRect(0f, cropRect.bottom, w, h, overlayPaint)
         canvas.drawRect(0f, cropRect.top, cropRect.left, cropRect.bottom, overlayPaint)
@@ -155,18 +165,24 @@ class CropView(context: Context, attrs: AttributeSet?) : View(context, attrs) {
                 if (touchMode == TOUCH_DRAG) {
                     val newRect = RectF(cropRect)
                     newRect.offset(dx, dy)
-                    if (newRect.left >= 0 && newRect.top >= 0 && newRect.right <= width && newRect.bottom <= height) {
-                        cropRect.set(newRect)
-                    }
+                    
+                    // Strictly constrain to image bounds
+                    if (newRect.left < imageBounds.left) newRect.offset(imageBounds.left - newRect.left, 0f)
+                    if (newRect.top < imageBounds.top) newRect.offset(0f, imageBounds.top - newRect.top)
+                    if (newRect.right > imageBounds.right) newRect.offset(imageBounds.right - newRect.right, 0f)
+                    if (newRect.bottom > imageBounds.bottom) newRect.offset(0f, imageBounds.bottom - newRect.bottom)
+                    
+                    cropRect.set(newRect)
                 } else if (touchMode == TOUCH_RESIZE_BR) {
                     val targetAspect = aspectX / aspectY
-                    val newWidth = (cropRect.width() + dx).coerceAtLeast(100f)
-                    val newHeight = newWidth / targetAspect
-                    val newRect = RectF(cropRect.left, cropRect.top, cropRect.left + newWidth, cropRect.top + newHeight)
                     
-                    if (newRect.right <= width && newRect.bottom <= height) {
-                        cropRect.set(newRect)
-                    }
+                    // Calculate max possible width based on image boundaries
+                    val maxWidth = (imageBounds.right - cropRect.left).coerceAtMost((imageBounds.bottom - cropRect.top) * targetAspect)
+                    
+                    var newWidth = (cropRect.width() + dx).coerceIn(100f, maxWidth)
+                    var newHeight = newWidth / targetAspect
+                    
+                    cropRect.set(cropRect.left, cropRect.top, cropRect.left + newWidth, cropRect.top + newHeight)
                 }
 
                 lastX = event.x
@@ -189,8 +205,7 @@ class CropView(context: Context, attrs: AttributeSet?) : View(context, attrs) {
     fun getCroppedBitmap(): Bitmap? {
         val original = sourceBitmap ?: return null
         
-        // Use the preview matrix but map it back to the ORIGINAL high-res bitmap coordinates
-        // We first need the matrix that transforms original to current screen view
+        // Map cropRect (view coords) back to original bitmap coordinates
         val fullMatrix = Matrix()
         val scale = minOf(width.toFloat() / original.width, height.toFloat() / original.height)
         val dx = (width - original.width * scale) / 2f
@@ -206,12 +221,11 @@ class CropView(context: Context, attrs: AttributeSet?) : View(context, attrs) {
         
         val left = bitmapRect.left.toInt().coerceIn(0, original.width - 1)
         val top = bitmapRect.top.toInt().coerceIn(0, original.height - 1)
-        val width = bitmapRect.width().toInt().coerceAtMost(original.width - left)
-        val height = bitmapRect.height().toInt().coerceAtMost(original.height - top)
+        val w = bitmapRect.width().toInt().coerceAtMost(original.width - left)
+        val h = bitmapRect.height().toInt().coerceAtMost(original.height - top)
         
-        if (width <= 0 || height <= 0) return null
+        if (w <= 0 || h <= 0) return null
         
-        // Final crop happens at full resolution!
-        return Bitmap.createBitmap(original, left, top, width, height)
+        return Bitmap.createBitmap(original, left, top, w, h)
     }
 }
