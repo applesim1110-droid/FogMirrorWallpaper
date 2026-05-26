@@ -9,9 +9,13 @@ import android.content.Intent
 import android.graphics.*
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
+import kotlin.math.hypot
 
 class MainActivity : Activity() {
 
@@ -28,6 +32,19 @@ class MainActivity : Activity() {
     private var currentDensity = 235
     private var currentColor = Color.argb(235, 205, 210, 215)
     private var isAuto = true
+
+    // Interactive Preview State
+    private var previewClearBmp: Bitmap? = null
+    private var previewFogBmp: Bitmap? = null
+    private var maskBmp: Bitmap? = null
+    private var maskCanvas: Canvas? = null
+    private val wipePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeWidth = 100f
+        maskFilter = BlurMaskFilter(30f, BlurMaskFilter.Blur.NORMAL)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,18 +67,11 @@ class MainActivity : Activity() {
         sbDensity = findViewById(R.id.sb_density)
         colorLayout = findViewById(R.id.layout_color_presets)
 
-        // Add some preset colors
         val colors = intArrayOf(
-            Color.rgb(205, 210, 215), // Silver
-            Color.rgb(180, 170, 160), // Amber
-            Color.rgb(220, 230, 240), // Arctic
-            Color.rgb(255, 255, 255), // White
-            Color.rgb(150, 150, 150)  // Dark
+            Color.rgb(205, 210, 215), Color.rgb(180, 170, 160),
+            Color.rgb(220, 230, 240), Color.rgb(255, 255, 255), Color.rgb(150, 150, 150)
         )
-
-        for (color in colors) {
-            addColorPreset(color)
-        }
+        for (color in colors) addColorPreset(color)
 
         val customButton = Button(this).apply {
             text = getString(R.string.custom_color)
@@ -72,9 +82,7 @@ class MainActivity : Activity() {
 
     private fun addColorPreset(color: Int) {
         val view = View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(100, 100).apply {
-                setMargins(0, 0, 16, 0)
-            }
+            layoutParams = LinearLayout.LayoutParams(100, 100).apply { setMargins(0, 0, 16, 0) }
             setBackgroundColor(color)
             setOnClickListener {
                 currentColor = Color.argb(currentDensity, Color.red(color), Color.green(color), Color.blue(color))
@@ -141,20 +149,12 @@ class MainActivity : Activity() {
             startActivityForResult(intent, REQUEST_CODE_PICK_IMAGE)
         }
 
-        findViewById<Button>(R.id.btn_go_to_customize).setOnClickListener {
-            switchToPreviewMode(true)
-        }
-
-        findViewById<ImageButton>(R.id.btn_back_to_main).setOnClickListener {
-            switchToPreviewMode(false)
-        }
+        findViewById<Button>(R.id.btn_go_to_customize).setOnClickListener { switchToPreviewMode(true) }
+        findViewById<ImageButton>(R.id.btn_back_to_main).setOnClickListener { switchToPreviewMode(false) }
 
         findViewById<Button>(R.id.btn_apply_wallpaper).setOnClickListener {
             val intent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).apply {
-                putExtra(
-                    WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
-                    ComponentName(this@MainActivity, FogMirrorWallpaperService::class.java)
-                )
+                putExtra(WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT, ComponentName(this@MainActivity, FogMirrorWallpaperService::class.java))
             }
             startActivity(intent)
         }
@@ -177,6 +177,31 @@ class MainActivity : Activity() {
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) { saveSettings() }
         })
+
+        // Setup touch listener for live sweep preview
+        previewFog.setOnTouchListener { v, event ->
+            handlePreviewTouch(event)
+            true
+        }
+    }
+
+    private var lastTouchX = 0f
+    private var lastTouchY = 0f
+
+    private fun handlePreviewTouch(event: MotionEvent) {
+        val canvas = maskCanvas ?: return
+        when (event.action) {
+            MotionEvent.ACTION_DOWN -> {
+                lastTouchX = event.x
+                lastTouchY = event.y
+            }
+            MotionEvent.ACTION_MOVE -> {
+                canvas.drawLine(lastTouchX, lastTouchY, event.x, event.y, wipePaint)
+                lastTouchX = event.x
+                lastTouchY = event.y
+                renderCompositePreview()
+            }
+        }
     }
 
     private fun switchToPreviewMode(showPreview: Boolean) {
@@ -187,27 +212,80 @@ class MainActivity : Activity() {
 
     private fun updatePreview() {
         val prefs = getSharedPreferences("wallpaper_prefs", Context.MODE_PRIVATE)
-        val uriString = prefs.getString("background_uri", null)
+        val uriString = prefs.getString("background_uri", null) ?: return
         
-        if (uriString != null) {
-            try {
-                val uri = Uri.parse(uriString)
-                contentResolver.openInputStream(uri)?.use { stream ->
-                    val bmp = BitmapFactory.decodeStream(stream)
-                    previewBg.setImageBitmap(bmp)
-                    
-                    val blurred = blurForPreview(bmp)
-                    previewFog.setImageBitmap(blurred)
-                    
-                    if (isAuto) {
-                        previewFog.setColorFilter(Color.argb(currentDensity, 205, 210, 215), PorterDuff.Mode.SRC_ATOP)
-                    } else {
-                        previewFog.setColorFilter(currentColor, PorterDuff.Mode.SRC_ATOP)
-                    }
-                    previewFog.imageAlpha = currentDensity
+        try {
+            val uri = Uri.parse(uriString)
+            contentResolver.openInputStream(uri)?.use { stream ->
+                val bmp = BitmapFactory.decodeStream(stream)
+                previewClearBmp = bmp
+                previewBg.setImageBitmap(bmp)
+                
+                previewFogBmp = blurForPreview(bmp)
+                
+                // Reset interaction mask
+                maskBmp = Bitmap.createBitmap(bmp.width, bmp.height, Bitmap.Config.ALPHA_8)
+                maskCanvas = Canvas(maskBmp!!)
+                
+                if (isAuto) {
+                    calculateAutoDensityAndColor(bmp)
                 }
-            } catch (e: Exception) {}
+                
+                renderCompositePreview()
+            }
+        } catch (e: Exception) {}
+    }
+
+    private fun calculateAutoDensityAndColor(src: Bitmap) {
+        val sampleSize = 100
+        val x = (src.width / 2 - sampleSize / 2).coerceAtLeast(0)
+        val y = (src.height / 2 - sampleSize / 2).coerceAtLeast(0)
+        val w = sampleSize.coerceAtMost(src.width - x)
+        val h = sampleSize.coerceAtMost(src.height - y)
+        val pixels = IntArray(w * h)
+        src.getPixels(pixels, 0, w, x, y, w, h)
+        
+        var r = 0L; var g = 0L; var b = 0L; var lum = 0L
+        for (p in pixels) {
+            val red = Color.red(p); val green = Color.green(p); val blue = Color.blue(p)
+            r += red; g += green; b += blue
+            lum += (0.299 * red + 0.587 * green + 0.114 * blue).toLong()
         }
+        val avgR = (r / pixels.size).toInt(); val avgG = (g / pixels.size).toInt(); val avgB = (b / pixels.size).toInt()
+        val avgLum = (lum / pixels.size).toInt()
+
+        // Balance color
+        val balR = (210 * 0.7f + avgR * 0.3f).toInt().coerceIn(0, 255)
+        val balG = (215 * 0.7f + avgG * 0.3f).toInt().coerceIn(0, 255)
+        val balB = (220 * 0.7f + avgB * 0.3f).toInt().coerceIn(0, 255)
+
+        // Balanced density: If background is dark, make fog lighter/thinner. If light, make it denser.
+        currentDensity = if (avgLum < 100) 180 else 235
+        currentColor = Color.argb(currentDensity, balR, balG, balB)
+        
+        sbDensity.progress = currentDensity
+    }
+
+    private fun renderCompositePreview() {
+        val fog = previewFogBmp ?: return
+        val mask = maskBmp ?: return
+        
+        val result = Bitmap.createBitmap(fog.width, fog.height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(result)
+        
+        // 1. Draw fog base
+        val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        canvas.drawBitmap(fog, 0f, 0f, p)
+        
+        // 2. Draw tint
+        val tint = if (isAuto) Color.argb(currentDensity, 205, 210, 215) else currentColor
+        canvas.drawColor(tint, PorterDuff.Mode.SRC_ATOP)
+        
+        // 3. Subtract interaction mask (sweep animation)
+        val mPaint = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT) }
+        canvas.drawBitmap(mask, 0f, 0f, mPaint)
+        
+        previewFog.setImageBitmap(result)
     }
 
     private fun blurForPreview(src: Bitmap): Bitmap {
@@ -221,16 +299,13 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (resultCode != RESULT_OK) return
-
         if (requestCode == REQUEST_CODE_PICK_IMAGE) {
             data?.data?.let { uri ->
-                val intent = Intent(this, CropActivity::class.java).apply {
-                    putExtra("uri", uri.toString())
-                }
+                val intent = Intent(this, CropActivity::class.java).apply { putExtra("uri", uri.toString()) }
                 startActivityForResult(intent, REQUEST_CODE_CROP_IMAGE)
             }
         } else if (requestCode == REQUEST_CODE_CROP_IMAGE) {
-            Toast.makeText(this, R.string.image_selected, Toast.LENGTH_SHORT).show()
+            updatePreview()
             switchToPreviewMode(true)
         }
     }
