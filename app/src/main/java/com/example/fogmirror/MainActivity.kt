@@ -33,8 +33,10 @@ class MainActivity : Activity() {
     // Interactive Preview State
     private var previewClearBmp: Bitmap? = null
     private var previewFogBmp: Bitmap? = null
+    private var previewNoiseBmp: Bitmap? = null
     private var maskBmp: Bitmap? = null
     private var maskCanvas: Canvas? = null
+    
     private val wipePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
         style = Paint.Style.STROKE
@@ -51,10 +53,6 @@ class MainActivity : Activity() {
         loadSettings()
         setupListeners()
         
-        // Detect if opened from Wallpaper Settings or directly
-        val isFromSettings = intent.action == Intent.ACTION_MAIN && intent.component?.className == "com.example.fogmirror.MainActivity"
-        // Actually, the wallpaper picker just launches the activity. 
-        // If we have a background image, we can default to preview mode.
         val prefs = getSharedPreferences("wallpaper_prefs", Context.MODE_PRIVATE)
         if (prefs.contains("background_uri")) {
             switchToPreviewMode(true)
@@ -237,6 +235,7 @@ class MainActivity : Activity() {
                 previewBg.setImageBitmap(bmp)
                 
                 previewFogBmp = blurForPreview(bmp)
+                previewNoiseBmp = createNoiseForPreview(bmp.width, bmp.height)
                 
                 maskBmp = Bitmap.createBitmap(bmp.width, bmp.height, Bitmap.Config.ALPHA_8)
                 maskCanvas = Canvas(maskBmp!!)
@@ -280,20 +279,34 @@ class MainActivity : Activity() {
 
     private fun renderCompositePreview() {
         val fog = previewFogBmp ?: return
+        val noise = previewNoiseBmp ?: return
         val mask = maskBmp ?: return
         
         val result = Bitmap.createBitmap(fog.width, fog.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(result)
         
-        val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-        canvas.drawBitmap(fog, 0f, 0f, p)
+        // Match service rendering exactly
+        val layer = canvas.saveLayer(0f, 0f, fog.width.toFloat(), fog.height.toFloat(), null)
         
-        val tint = if (isAuto) currentColor else currentColor
-        canvas.drawColor(tint, PorterDuff.Mode.SRC_ATOP)
+        // 1. Fog Bitmap
+        val fPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+            alpha = currentDensity
+        }
+        canvas.drawBitmap(fog, 0f, 0f, fPaint)
         
+        // 2. Tint Balance
+        val balancePaint = Paint().apply { color = currentColor; alpha = 100 }
+        canvas.drawRect(0f, 0f, fog.width.toFloat(), fog.height.toFloat(), balancePaint)
+        
+        // 3. Noise Texture
+        val nPaint = Paint().apply { alpha = 130 }
+        canvas.drawBitmap(noise, 0f, 0f, nPaint)
+        
+        // 4. Interaction Mask (DST_OUT)
         val mPaint = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT) }
         canvas.drawBitmap(mask, 0f, 0f, mPaint)
         
+        canvas.restoreToCount(layer)
         previewFog.setImageBitmap(result)
     }
 
@@ -303,6 +316,17 @@ class MainActivity : Activity() {
         val h = (src.height * scale).toInt().coerceAtLeast(1)
         val small = Bitmap.createScaledBitmap(src, w, h, true)
         return Bitmap.createScaledBitmap(small, src.width, src.height, true)
+    }
+
+    private fun createNoiseForPreview(w: Int, h: Int): Bitmap {
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val paint = Paint().apply {
+            shader = LinearGradient(0f, 0f, w.toFloat(), h.toFloat(),
+                Color.argb(130, 190, 195, 200), Color.argb(170, 160, 165, 170), Shader.TileMode.CLAMP)
+        }
+        c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), paint)
+        return bmp
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
