@@ -3,4 +3,9 @@
     <string name="app_name">Fog Mirror Wallpaper</string>
     <string name="wallpaper_name">Fog Mirror</string>
     <string name="open_wallpaper_settings">Open Live Wallpaper Picker</string>
+    <string name="pick_image">Choose Image from Gallery</string>
+    <string name="set_wallpaper">Set Wallpaper</string>
+    <string name="image_selected">Background updated!</string>
+    <string name="crop_title">Adjust Your Wallpaper</string>
+    <string name="btn_done">Done</string>
 </resources>

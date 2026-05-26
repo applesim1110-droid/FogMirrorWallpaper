@@ -1,6 +1,9 @@
 package com.example.fogmirror
 
+import android.content.Context
+import android.content.SharedPreferences
 import android.graphics.*
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.service.wallpaper.WallpaperService
@@ -24,9 +27,10 @@ class FogMirrorWallpaperService : WallpaperService() {
         var time: Float
     )
 
-    private inner class FogEngine : Engine() {
+    private inner class FogEngine : Engine(), SharedPreferences.OnSharedPreferenceChangeListener {
 
         private val handler = Handler(Looper.getMainLooper())
+        private val prefs = getSharedPreferences("wallpaper_prefs", Context.MODE_PRIVATE)
 
         private var visible = false
         private var surfaceWidth = 1
@@ -48,6 +52,7 @@ class FogMirrorWallpaperService : WallpaperService() {
 
         private val clearPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
+        private var fogColor = Color.argb(235, 205, 210, 215)
         private val fogPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
             alpha = INITIAL_FOG_ALPHA
         }
@@ -67,20 +72,82 @@ class FogMirrorWallpaperService : WallpaperService() {
         override fun onCreate(holder: SurfaceHolder) {
             super.onCreate(holder)
             setTouchEventsEnabled(true)
-
-            // Safely decode or provide fallback to prevent crashes if files are missing/corrupted
-            clearBitmap = BitmapFactory.decodeResource(resources, R.drawable.mirror_clear)
-                ?: Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
-
-            fogBitmap = BitmapFactory.decodeResource(resources, R.drawable.fog_blur)
-                ?: createFallbackFog()
+            prefs.registerOnSharedPreferenceChangeListener(this)
+            loadBitmaps()
         }
 
-        private fun createFallbackFog(): Bitmap {
-            val bmp = Bitmap.createBitmap(512, 512, Bitmap.Config.ARGB_8888)
-            // Balanced neutral grey: subtle cool hint but high enough white/grey to not clash with warm background
-            Canvas(bmp).drawColor(Color.argb(235, 205, 210, 215))
-            return bmp
+        override fun onDestroy() {
+            prefs.unregisterOnSharedPreferenceChangeListener(this)
+            super.onDestroy()
+        }
+
+        override fun onSharedPreferenceChanged(p: SharedPreferences?, key: String?) {
+            if (key == "background_uri") {
+                loadBitmaps()
+                setupMatrix()
+                drawFrame()
+            }
+        }
+
+        private fun loadBitmaps() {
+            val uriString = prefs.getString("background_uri", null)
+            var loadedBitmap: Bitmap? = null
+
+            if (uriString != null) {
+                try {
+                    val uri = Uri.parse(uriString)
+                    val inputStream = contentResolver.openInputStream(uri)
+                    loadedBitmap = BitmapFactory.decodeStream(inputStream)
+                } catch (e: Exception) {
+                    // Fallback
+                }
+            }
+
+            clearBitmap = loadedBitmap ?: BitmapFactory.decodeResource(resources, R.drawable.mirror_clear)
+                ?: Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+
+            updateBalancedFogColor(clearBitmap)
+            fogBitmap = blurBitmapHighRes(clearBitmap)
+        }
+
+        private fun updateBalancedFogColor(src: Bitmap) {
+            val sampleSize = 100
+            val x = (src.width / 2 - sampleSize / 2).coerceAtLeast(0)
+            val y = (src.height / 2 - sampleSize / 2).coerceAtLeast(0)
+            val w = sampleSize.coerceAtMost(src.width - x)
+            val h = sampleSize.coerceAtMost(src.height - y)
+            
+            val pixels = IntArray(w * h)
+            src.getPixels(pixels, 0, w, x, y, w, h)
+            
+            var r = 0L
+            var g = 0L
+            var b = 0L
+            for (pixel in pixels) {
+                r += Color.red(pixel)
+                g += Color.green(pixel)
+                b += Color.blue(pixel)
+            }
+            
+            val avgR = (r / pixels.size).toInt()
+            val avgG = (g / pixels.size).toInt()
+            val avgB = (b / pixels.size).toInt()
+
+            val balanceR = (210 * 0.7f + avgR * 0.3f).toInt().coerceIn(0, 255)
+            val balanceG = (215 * 0.7f + avgG * 0.3f).toInt().coerceIn(0, 255)
+            val balanceB = (220 * 0.7f + avgB * 0.3f).toInt().coerceIn(0, 255)
+            
+            fogColor = Color.argb(235, balanceR, balanceG, balanceB)
+        }
+
+        private fun blurBitmapHighRes(src: Bitmap): Bitmap {
+            val blurred = src.copy(Bitmap.Config.ARGB_8888, true)
+            val canvas = Canvas(blurred)
+            val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG).apply {
+                maskFilter = BlurMaskFilter(25f, BlurMaskFilter.Blur.NORMAL)
+            }
+            canvas.drawBitmap(src, 0f, 0f, paint)
+            return blurred
         }
 
         override fun onVisibilityChanged(visible: Boolean) {
@@ -113,15 +180,12 @@ class FogMirrorWallpaperService : WallpaperService() {
 
         override fun onTouchEvent(event: MotionEvent) {
             when (event.actionMasked) {
-
                 MotionEvent.ACTION_DOWN -> {
                     startNewStroke(event.x, event.y)
                 }
-
                 MotionEvent.ACTION_MOVE -> {
                     drawOnLatest(event.x, event.y)
                 }
-
                 MotionEvent.ACTION_UP -> {
                     hasLastTouch = false
                 }
@@ -152,8 +216,6 @@ class FogMirrorWallpaperService : WallpaperService() {
                 strokes.removeAt(0)
             }
 
-            // Use ALPHA_8 to save memory (1 byte per pixel vs 4)
-            // Essential for high-resolution tablets to avoid OutOfMemoryError
             val bmp = Bitmap.createBitmap(surfaceWidth, surfaceHeight, Bitmap.Config.ALPHA_8)
             val stroke = WipeStroke(bmp, 0f)
 
@@ -211,7 +273,6 @@ class FogMirrorWallpaperService : WallpaperService() {
 
             lastFrameTime = now
 
-            // update strokes independently
             val iterator = strokes.iterator()
             while (iterator.hasNext()) {
                 val s = iterator.next()
@@ -242,13 +303,13 @@ class FogMirrorWallpaperService : WallpaperService() {
                 null
             )
 
-            // fog layer
             canvas.drawBitmap(fogBitmap, matrix, fogPaint)
-
-            // texture
+            
+            val balancePaint = Paint().apply { color = fogColor; alpha = 100 }
+            canvas.drawRect(0f, 0f, surfaceWidth.toFloat(), surfaceHeight.toFloat(), balancePaint)
+            
             canvas.drawBitmap(noiseBitmap, 0f, 0f, noisePaint)
 
-            // apply strokes independently
             for (s in strokes) {
                 val progress = (s.time / WIPE_FADE_SECONDS)
                     .coerceIn(0f, 1f)
@@ -271,7 +332,6 @@ class FogMirrorWallpaperService : WallpaperService() {
             val paint = Paint().apply {
                 shader = LinearGradient(
                     0f, 0f, w.toFloat(), h.toFloat(),
-                    // Neutral airy tones: Soft grey with a touch of silver
                     Color.argb(130, 190, 195, 200),
                     Color.argb(170, 160, 165, 170),
                     Shader.TileMode.CLAMP
