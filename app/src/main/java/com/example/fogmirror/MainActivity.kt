@@ -30,7 +30,7 @@ class MainActivity : Activity() {
     private var currentColor = Color.argb(235, 205, 210, 215)
     private var isAuto = true
 
-    // Interactive Preview State
+    // Interactive Preview State (Cached Bitmaps)
     private var previewClearBmp: Bitmap? = null
     private var previewFogBmp: Bitmap? = null
     private var previewNoiseBmp: Bitmap? = null
@@ -90,7 +90,7 @@ class MainActivity : Activity() {
             setOnClickListener {
                 currentColor = Color.argb(currentDensity, Color.red(color), Color.green(color), Color.blue(color))
                 saveSettings()
-                updatePreview()
+                renderCompositePreview()
             }
         }
         colorLayout.addView(view)
@@ -111,7 +111,7 @@ class MainActivity : Activity() {
             .setPositiveButton("Set") { _, _ ->
                 currentColor = Color.argb(currentDensity, rSeek.progress, gSeek.progress, bSeek.progress)
                 saveSettings()
-                updatePreview()
+                renderCompositePreview()
             }
             .setNegativeButton("Cancel", null)
             .show()
@@ -177,7 +177,14 @@ class MainActivity : Activity() {
             isAuto = isChecked
             layoutManual.visibility = if (isChecked) View.GONE else View.VISIBLE
             saveSettings()
-            updatePreview()
+            
+            // Re-calculate or re-load based on toggle
+            if (isAuto) {
+                previewClearBmp?.let { calculateAutoDensityAndColor(it) }
+            } else {
+                loadSettings() // Restore manual values
+            }
+            renderCompositePreview()
         }
 
         sbDensity.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -185,7 +192,7 @@ class MainActivity : Activity() {
                 if (fromUser) {
                     currentDensity = progress
                     currentColor = Color.argb(currentDensity, Color.red(currentColor), Color.green(currentColor), Color.blue(currentColor))
-                    updatePreview()
+                    renderCompositePreview()
                 }
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
@@ -220,10 +227,10 @@ class MainActivity : Activity() {
     private fun switchToPreviewMode(showPreview: Boolean) {
         layoutLanding.visibility = if (showPreview) View.GONE else View.VISIBLE
         layoutPreviewMode.visibility = if (showPreview) View.VISIBLE else View.GONE
-        if (showPreview) updatePreview()
+        if (showPreview) loadBitmapsAndCalculate()
     }
 
-    private fun updatePreview() {
+    private fun loadBitmapsAndCalculate() {
         val prefs = getSharedPreferences("wallpaper_prefs", Context.MODE_PRIVATE)
         val uriString = prefs.getString("background_uri", null) ?: return
         
@@ -247,6 +254,11 @@ class MainActivity : Activity() {
                 renderCompositePreview()
             }
         } catch (e: Exception) {}
+    }
+
+    private fun updatePreview() {
+        // Fast update: just re-render composite without reloading bitmaps
+        renderCompositePreview()
     }
 
     private fun calculateAutoDensityAndColor(src: Bitmap) {
@@ -285,7 +297,6 @@ class MainActivity : Activity() {
         val result = Bitmap.createBitmap(fog.width, fog.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(result)
         
-        // Match service rendering exactly
         val layer = canvas.saveLayer(0f, 0f, fog.width.toFloat(), fog.height.toFloat(), null)
         
         // 1. Fog Bitmap
@@ -338,7 +349,7 @@ class MainActivity : Activity() {
                 startActivityForResult(intent, REQUEST_CODE_CROP_IMAGE)
             }
         } else if (requestCode == REQUEST_CODE_CROP_IMAGE) {
-            updatePreview()
+            loadBitmapsAndCalculate()
             switchToPreviewMode(true)
         }
     }

@@ -98,7 +98,12 @@ class FogMirrorWallpaperService : WallpaperService() {
 
         private fun updateSettings() {
             val isAuto = prefs.getBoolean("auto_fog", true)
-            if (!isAuto) {
+            if (isAuto) {
+                // If auto, re-calculate based on current clearBitmap
+                if (::clearBitmap.isInitialized) {
+                    calculateAutoDensityAndColor(clearBitmap)
+                }
+            } else {
                 fogDensity = prefs.getInt("fog_density", DEFAULT_FOG_ALPHA)
                 fogColor = prefs.getInt("fog_color", Color.argb(235, 205, 210, 215))
                 fogPaint.alpha = fogDensity
@@ -122,6 +127,8 @@ class FogMirrorWallpaperService : WallpaperService() {
 
             if (prefs.getBoolean("auto_fog", true)) {
                 calculateAutoDensityAndColor(clearBitmap)
+            } else {
+                updateSettings() // Apply manual density
             }
 
             fogBitmap = blurBitmapHighRes(clearBitmap)
@@ -150,7 +157,6 @@ class FogMirrorWallpaperService : WallpaperService() {
             val balG = (215 * 0.7f + avgG * 0.3f).toInt().coerceIn(0, 255)
             val balB = (220 * 0.7f + avgB * 0.3f).toInt().coerceIn(0, 255)
             
-            // Auto-balanced density
             fogDensity = if (avgLum < 100) 180 else 235
             fogColor = Color.argb(fogDensity, balR, balG, balB)
             fogPaint.alpha = fogDensity
