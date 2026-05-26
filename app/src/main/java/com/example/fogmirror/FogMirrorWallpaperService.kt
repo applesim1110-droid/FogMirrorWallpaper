@@ -24,6 +24,14 @@ class FogMirrorWallpaperService : WallpaperService() {
         var time: Float
     )
 
+    private data class DripPoint(
+        var x: Float,
+        var y: Float,
+        var velocity: Float,
+        var width: Float,
+        var active: Boolean = true
+    )
+
     private inner class FogEngine : Engine() {
 
         private val handler = Handler(Looper.getMainLooper())
@@ -40,6 +48,11 @@ class FogMirrorWallpaperService : WallpaperService() {
         private lateinit var clearBitmap: Bitmap
         private lateinit var fogBitmap: Bitmap
         private lateinit var noiseBitmap: Bitmap
+        private lateinit var trailBitmap: Bitmap
+        private lateinit var trailCanvas: Canvas
+
+        private val drips = mutableListOf<DripPoint>()
+        private val random = java.util.Random()
 
         private val strokes = mutableListOf<WipeStroke>()
 
@@ -62,6 +75,12 @@ class FogMirrorWallpaperService : WallpaperService() {
 
         private val noisePaint = Paint().apply {
             alpha = 130
+        }
+
+        private val dripPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.ROUND
         }
 
         override fun onCreate(holder: SurfaceHolder) {
@@ -120,6 +139,10 @@ class FogMirrorWallpaperService : WallpaperService() {
 
                 MotionEvent.ACTION_MOVE -> {
                     drawOnLatest(event.x, event.y)
+                    // Occasionally spawn a drip at the current touch point
+                    if (random.nextFloat() < 0.15f) {
+                        spawnDrip(event.x, event.y)
+                    }
                 }
 
                 MotionEvent.ACTION_UP -> {
@@ -128,8 +151,21 @@ class FogMirrorWallpaperService : WallpaperService() {
             }
         }
 
+        private fun spawnDrip(x: Float, y: Float) {
+            drips.add(DripPoint(
+                x = x,
+                y = y,
+                velocity = 80f + random.nextFloat() * 120f,
+                width = 8f + random.nextFloat() * 12f
+            ))
+        }
+
         private fun createBuffers() {
             noiseBitmap = createNoise(surfaceWidth, surfaceHeight)
+            
+            trailBitmap = Bitmap.createBitmap(surfaceWidth, surfaceHeight, Bitmap.Config.ALPHA_8)
+            trailCanvas = Canvas(trailBitmap)
+            
             setupMatrix()
         }
 
@@ -211,6 +247,8 @@ class FogMirrorWallpaperService : WallpaperService() {
 
             lastFrameTime = now
 
+            updateDrips(dt)
+
             // update strokes independently
             val iterator = strokes.iterator()
             while (iterator.hasNext()) {
@@ -234,6 +272,35 @@ class FogMirrorWallpaperService : WallpaperService() {
             handler.postDelayed(frameRunnable, 16)
         }
 
+        private fun updateDrips(dt: Float) {
+            val iterator = drips.iterator()
+            while (iterator.hasNext()) {
+                val drip = iterator.next()
+                if (!drip.active) {
+                    iterator.remove()
+                    continue
+                }
+
+                val oldY = drip.y
+                // Variable speed to simulate surface tension "stutter"
+                val speedVar = 1f + 0.3f * kotlin.math.sin(nowToSeconds() * 5.0).toFloat()
+                drip.y += drip.velocity * speedVar * dt
+                
+                // Gradually thin out the drip
+                drip.width *= (1f - 0.05f * dt)
+
+                // Draw to trail bitmap
+                dripPaint.strokeWidth = drip.width
+                trailCanvas.drawLine(drip.x, oldY, drip.x, drip.y, dripPaint)
+
+                if (drip.y > surfaceHeight || drip.width < 2f) {
+                    drip.active = false
+                }
+            }
+        }
+
+        private fun nowToSeconds(): Float = System.currentTimeMillis() / 1000f
+
         private fun drawFog(canvas: Canvas) {
             val layer = canvas.saveLayer(
                 0f, 0f,
@@ -247,6 +314,12 @@ class FogMirrorWallpaperService : WallpaperService() {
 
             // texture
             canvas.drawBitmap(noiseBitmap, 0f, 0f, noisePaint)
+
+            // Apply trails (water traces)
+            val maskPaint = Paint().apply {
+                xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
+            }
+            canvas.drawBitmap(trailBitmap, 0f, 0f, maskPaint)
 
             // apply strokes independently
             for (s in strokes) {
