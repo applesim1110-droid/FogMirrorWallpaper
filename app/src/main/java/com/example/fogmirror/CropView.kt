@@ -14,7 +14,7 @@ class CropView(context: Context, attrs: AttributeSet?) : View(context, attrs) {
     private var aspectY: Float = 1f
 
     private val cropRect = RectF()
-    private val imageMatrix = Matrix()
+    private val drawMatrix = Matrix()
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val overlayPaint = Paint().apply {
         color = Color.BLACK
@@ -28,12 +28,34 @@ class CropView(context: Context, attrs: AttributeSet?) : View(context, attrs) {
 
     private var lastX = 0f
     private var lastY = 0f
-    private var isDragging = false
+    private var isDraggingCrop = false
 
     private val scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScale(detector: ScaleGestureDetector): Boolean {
             val scaleFactor = detector.scaleFactor
-            imageMatrix.postScale(scaleFactor, scaleFactor, detector.focusX, detector.focusY)
+            val targetAspect = aspectX / aspectY
+            
+            val newWidth = cropRect.width() * scaleFactor
+            val newHeight = newWidth / targetAspect
+            
+            // Limit minimum size
+            if (newWidth < 100f || newHeight < 100f) return true
+
+            val centerX = cropRect.centerX()
+            val centerY = cropRect.centerY()
+            
+            val newRect = RectF(
+                centerX - newWidth / 2f,
+                centerY - newHeight / 2f,
+                centerX + newWidth / 2f,
+                centerY + newHeight / 2f
+            )
+
+            // Keep within view bounds
+            if (newRect.left >= 0 && newRect.top >= 0 && newRect.right <= width && newRect.bottom <= height) {
+                cropRect.set(newRect)
+            }
+            
             invalidate()
             return true
         }
@@ -42,7 +64,6 @@ class CropView(context: Context, attrs: AttributeSet?) : View(context, attrs) {
     fun setBitmap(bitmap: Bitmap, initialPortrait: Boolean) {
         sourceBitmap = bitmap
         setOrientation(initialPortrait)
-        resetImageMatrix()
     }
 
     fun setOrientation(portrait: Boolean) {
@@ -57,48 +78,45 @@ class CropView(context: Context, attrs: AttributeSet?) : View(context, attrs) {
             aspectX = Math.max(w, h)
             aspectY = Math.min(w, h)
         }
-        updateCropRect()
+        resetCropRect()
         invalidate()
     }
 
-    private fun resetImageMatrix() {
-        val bitmap = sourceBitmap ?: return
-        imageMatrix.reset()
-        val scale = Math.max(width.toFloat() / bitmap.width, height.toFloat() / bitmap.height)
-        imageMatrix.setScale(scale, scale)
-        val dx = (width - bitmap.width * scale) / 2f
-        val dy = (height - bitmap.height * scale) / 2f
-        imageMatrix.postTranslate(dx, dy)
-        invalidate()
-    }
-
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        super.onSizeChanged(w, h, oldw, oldh)
-        updateCropRect()
-        if (oldw == 0) resetImageMatrix()
-    }
-
-    private fun updateCropRect() {
+    private fun resetCropRect() {
         if (width == 0 || height == 0) return
         val targetAspect = aspectX / aspectY
         var cropW: Float
         var cropH: Float
 
         if (width.toFloat() / height > targetAspect) {
-            cropH = height * 0.9f
+            cropH = height * 0.8f
             cropW = cropH * targetAspect
         } else {
-            cropW = width * 0.9f
+            cropW = width * 0.8f
             cropH = cropW / targetAspect
         }
         cropRect.set((width - cropW) / 2f, (height - cropH) / 2f, (width + cropW) / 2f, (height + cropH) / 2f)
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        val bitmap = sourceBitmap ?: return
+
+        // Matrix to fit bitmap inside view (static)
+        val scale = Math.min(w.toFloat() / bitmap.width, h.toFloat() / bitmap.height)
+        val dx = (w - bitmap.width * scale) / 2f
+        val dy = (h - bitmap.height * scale) / 2f
+        drawMatrix.setScale(scale, scale)
+        drawMatrix.postTranslate(dx, dy)
+        
+        resetCropRect()
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val bitmap = sourceBitmap ?: return
 
-        canvas.drawBitmap(bitmap, imageMatrix, paint)
+        canvas.drawBitmap(bitmap, drawMatrix, paint)
 
         // Draw dark overlay around crop rect
         val layer = canvas.saveLayer(0f, 0f, width.toFloat(), height.toFloat(), null)
@@ -119,22 +137,32 @@ class CropView(context: Context, attrs: AttributeSet?) : View(context, attrs) {
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                lastX = event.x
-                lastY = event.y
-                isDragging = true
+                if (cropRect.contains(event.x, event.y)) {
+                    lastX = event.x
+                    lastY = event.y
+                    isDraggingCrop = true
+                }
             }
             MotionEvent.ACTION_MOVE -> {
-                if (isDragging) {
+                if (isDraggingCrop) {
                     val dx = event.x - lastX
                     val dy = event.y - lastY
-                    imageMatrix.postTranslate(dx, dy)
+                    
+                    val newRect = RectF(cropRect)
+                    newRect.offset(dx, dy)
+                    
+                    // Constrain to view bounds
+                    if (newRect.left >= 0 && newRect.top >= 0 && newRect.right <= width && newRect.bottom <= height) {
+                        cropRect.set(newRect)
+                    }
+                    
                     lastX = event.x
                     lastY = event.y
                     invalidate()
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                isDragging = false
+                isDraggingCrop = false
             }
         }
         performClick()
@@ -149,9 +177,8 @@ class CropView(context: Context, attrs: AttributeSet?) : View(context, attrs) {
     fun getCroppedBitmap(): Bitmap? {
         val bitmap = sourceBitmap ?: return null
         
-        // Final cropped bitmap size based on cropRect size but mapped back to original image
         val inverse = Matrix()
-        imageMatrix.invert(inverse)
+        drawMatrix.invert(inverse)
         
         val bitmapRect = RectF()
         inverse.mapRect(bitmapRect, cropRect)
